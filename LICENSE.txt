@@ -1,0 +1,11 @@
+All Rights Reserved.
+
+Copyright (c) 2026 Yuki Inoue Nakata.
+
+This software is provided for the personal use of the copyright holder
+and is not licensed for redistribution, modification, or use by third
+parties.  Source code is hosted privately for development convenience only.
+
+No warranty is provided.
+
+For inquiries: dj.y.nakata@gmail.com

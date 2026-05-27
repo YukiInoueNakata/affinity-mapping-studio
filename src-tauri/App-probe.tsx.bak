@@ -1,0 +1,87 @@
+import { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+
+// Phase 5a — minimal scaffold.  Renderer code from kj-trace-studio/src/renderer/
+// will be ported here in 5a-2 onward.  For now this just verifies that the
+// Tauri shell + React + Vite chain is functional.
+export function App() {
+  const [reply, setReply] = useState<string>('');
+  const [name, setName] = useState<string>('世界');
+
+  async function callRust() {
+    try {
+      const r = await invoke<string>('greet', { name });
+      setReply(r);
+    } catch (e) {
+      setReply('error: ' + String(e));
+    }
+  }
+
+  return (
+    <div
+      style={{
+        fontFamily:
+          'system-ui, -apple-system, "Hiragino Kaku Gothic ProN", sans-serif',
+        padding: '24px',
+        maxWidth: '720px',
+        margin: '0 auto',
+        color: '#222',
+      }}
+    >
+      <h1 style={{ fontSize: '18px', marginBottom: '4px' }}>
+        KJ Trace Studio (Tauri)
+      </h1>
+      <p style={{ color: '#888', fontSize: '13px', marginTop: 0 }}>
+        Phase 5a — 雛形．renderer の移植は 5a-2 以降．
+      </p>
+
+      <section style={{ marginTop: '20px' }}>
+        <h2 style={{ fontSize: '14px', color: '#555' }}>
+          Probe: Tauri IPC (Rust ↔ React)
+        </h2>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="名前"
+            style={{
+              padding: '4px 8px',
+              fontSize: '13px',
+              border: '1px solid #ccc',
+              borderRadius: '3px',
+            }}
+          />
+          <button
+            onClick={callRust}
+            style={{
+              padding: '4px 12px',
+              fontSize: '13px',
+              cursor: 'pointer',
+              background: '#5b7e9f',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '3px',
+            }}
+          >
+            Rust を呼ぶ
+          </button>
+        </div>
+        {reply && (
+          <pre
+            style={{
+              marginTop: '12px',
+              padding: '8px 12px',
+              background: '#f6f4ea',
+              border: '1px solid #ddd5c0',
+              borderRadius: '3px',
+              fontSize: '12px',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {reply}
+          </pre>
+        )}
+      </section>
+    </div>
+  );
+}

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "KJ Trace Studio",
+  "version": "0.1.0",
+  "identifier": "jp.ritsumei.kj-trace.studio",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "KJ Trace Studio",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "publisher": "Yuki Inoue Nakata",
+    "category": "Productivity",
+    "shortDescription": "KJ 法支援ソフト (個人版)",
+    "longDescription": "KJ 法（川喜田二郎）作業を電子化するデスクトップアプリ．原文⇄カード往復を中心に，グループ化・関係図解・取り込み・エクスポートを提供．個人利用専用版．",
+    "copyright": "© 2026 Yuki Inoue Nakata",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["English", "Japanese"],
+        "displayLanguageSelector": false,
+        "compression": "lzma",
+        "installerHooks": "installer-hooks.nsh"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  }
+}

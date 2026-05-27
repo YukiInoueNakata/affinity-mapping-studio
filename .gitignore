@@ -1,0 +1,19 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+*.log
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Project files: user data, exclude
+*.kjproj
+*.kjproj.json
+*.bak.*
+*.daily.*
+*.kjproj.tmp
+!sample-*.kjproj
+!sample-*.kjproj.json

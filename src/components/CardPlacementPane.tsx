@@ -6,6 +6,7 @@ import {
   nextCardPositionForParticipant,
 } from '../domain/cards.js';
 import { makeSetCardPlacementCommand } from '../stores/commands.js';
+import { useKeyboardScroll } from '../hooks/useKeyboardScroll.js';
 import type { Card, CardPlacement } from '@shared/types/domain';
 
 /** Fisher-Yates shuffle: returns a new ordering of card ids. */
@@ -59,6 +60,7 @@ function PlacementSection({
   const selectedCardId = useProjectStore((s) => s.selectedCardId);
   const [collapsed, setCollapsed] = useState(false);
   const [shuffleOrder, setShuffleOrder] = useState<string[] | null>(null);
+  const kbScroll = useKeyboardScroll();
 
   // Apply the local shuffle order if it covers exactly the current card ids.
   // When the underlying card set changes (new add / remove) we drop the order
@@ -87,10 +89,27 @@ function PlacementSection({
     const card = project.data.cards.find((c) => c.id === cardId);
     if (!card) return;
     const pos = project.data.card_positions.find((p) => p.cardId === cardId);
-    const fallback = pos ?? {
-      cardId,
-      ...nextCardPositionForParticipant(project.data, card.participantId),
-    };
+    // (#5) 現在のキャンバス表示中心に置く. CanvasView が公開する getter を使い，
+    // 未マウント時は従来の participant 別 scatter 位置に fallback.
+    const getCenter = (
+      window as unknown as { __kjGetCanvasCenter?: () => { x: number; y: number } | null }
+    ).__kjGetCanvasCenter;
+    const center = typeof getCenter === 'function' ? getCenter() : null;
+    const base =
+      center ?? nextCardPositionForParticipant(project.data, card.participantId);
+    // 既存カードに重ならない空き位置を探す
+    const taken = project.data.card_positions.map((p) => ({ x: p.x, y: p.y }));
+    let x = base.x;
+    let y = base.y;
+    let guard = 0;
+    while (
+      taken.some((p) => Math.abs(p.x - x) < 30 && Math.abs(p.y - y) < 30) &&
+      guard < 60
+    ) {
+      x += 28;
+      y += 24;
+      guard++;
+    }
     applyCommand(
       makeSetCardPlacementCommand(
         cardId,
@@ -101,7 +120,7 @@ function PlacementSection({
         },
         {
           placement: 'canvas',
-          position: { x: fallback.x, y: fallback.y },
+          position: { x, y },
           now: new Date().toISOString(),
         }
       )
@@ -158,7 +177,7 @@ function PlacementSection({
         )}
       </header>
       {!collapsed && (
-        <div className="placement-list">
+        <div className="placement-list" {...kbScroll}>
           {cards.length === 0 && (
             <div className="muted small" style={{ padding: 8 }}>
               {placement === 'unclassified'

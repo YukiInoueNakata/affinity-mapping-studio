@@ -20,6 +20,8 @@ export interface CardNodeData {
   effectiveBorderStyle?: 'solid' | 'dashed' | 'dotted';
   maxChars?: number;
   collapsed?: boolean;
+  /** (#7) source serials for a merged card → shown as "← 003,005". */
+  mergedFrom?: number[];
 }
 
 function CardNodeImpl({ id, data, selected }: NodeProps<CardNodeData>) {
@@ -119,6 +121,14 @@ function CardNodeImpl({ id, data, selected }: NodeProps<CardNodeData>) {
           {isCollapsed ? '▶' : '▼'}
         </button>
         <span>{data.code}</span>
+        {data.mergedFrom && data.mergedFrom.length > 0 && (
+          <span
+            className="card-node-merged-from"
+            title={`結合元: ${data.mergedFrom.map((n) => String(n).padStart(3, '0')).join(', ')}`}
+          >
+            ← {data.mergedFrom.map((n) => String(n).padStart(3, '0')).join(',')}
+          </span>
+        )}
       </div>
       {isCollapsed ? null : editing ? (
         <textarea

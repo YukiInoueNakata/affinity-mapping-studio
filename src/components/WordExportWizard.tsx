@@ -18,6 +18,7 @@ import {
   buildResultsParagraph,
 } from '../domain/wordExport.js';
 import { generateWordDocBytes } from '../domain/wordDocxWriter.js';
+import { invoke } from '@tauri-apps/api/core';
 
 interface Props {
   open: boolean;
@@ -81,22 +82,21 @@ export function WordExportWizard({ open, onClose }: Props) {
     setGenerating(true);
     try {
       const bytes = await generateWordDocBytes(project.data, wiz);
-      const blob = new Blob([bytes.buffer as ArrayBuffer], {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
       const safe = (wiz.title || project.metadata.name || 'kj-export').replace(
         /[\\/:*?"<>|]/g,
         '_'
       );
       const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-      a.download = `${safe}_${ts}.docx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      // Tauri: pick a destination via the native dialog, then hand the bytes to
+      // Rust to write (the WebView2 renderer can't touch the filesystem itself).
+      const path = await invoke<string | null>('pick_save_file', {
+        title: 'Word ファイルの保存先',
+        defaultFileName: `${safe}_${ts}.docx`,
+        filters: [{ name: 'Word 文書', extensions: ['docx'] }],
+      });
+      if (!path) return; // cancelled
+      await invoke('write_bytes', { path, contents: Array.from(bytes) });
+      alert(`Word ファイルを保存しました:\n${path}`);
     } catch (e) {
       alert(`Word 生成に失敗しました: ${(e as Error).message}`);
     } finally {

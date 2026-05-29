@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import { getGroupLabel, getUngroupedCards } from '../domain/groups.js';
+import { useKeyboardScroll } from '../hooks/useKeyboardScroll.js';
 import type { Card, Group, ProjectData } from '@shared/types/domain';
 
 interface TreeNode {
@@ -113,6 +114,7 @@ export function HierarchyPane({ onClose }: { onClose(): void }) {
   const selectGroup = useProjectStore((s) => s.selectGroup);
   const selectedCardId = useProjectStore((s) => s.selectedCardId);
   const selectedGroupId = useProjectStore((s) => s.selectedGroupId);
+  const kbScroll = useKeyboardScroll();
 
   // Inverted state: the user explicitly collapses subtrees; everything else
   // stays visible. Default empty set = all groups expanded, all cards shown.
@@ -232,7 +234,7 @@ export function HierarchyPane({ onClose }: { onClose(): void }) {
       <div className="muted small" style={{ padding: '2px 8px', borderBottom: '1px solid var(--border)' }}>
         各行の ▼/▶ で個別開閉．グループの「N 枚」は所属カード数
       </div>
-      <div className="hierarchy-pane-body">
+      <div className="hierarchy-pane-body" {...kbScroll}>
         {visible.length === 0 ? (
           <div className="muted small" style={{ padding: 8 }}>
             (まだグループ・カードがありません)
@@ -253,6 +255,20 @@ export function HierarchyPane({ onClose }: { onClose(): void }) {
                     if (n.kind === 'card') selectCard(n.id);
                     else if (n.group) selectGroup(n.id);
                   }}
+                  onContextMenu={
+                    n.kind === 'card'
+                      ? (e) => {
+                          e.preventDefault();
+                          selectCard(n.id);
+                          // (#6) 右クリックでそのカードのキャンバス位置へジャンプ.
+                          // App がキャンバスタブへ切替え後 kj.centerOnCard を再発行.
+                          window.dispatchEvent(
+                            new CustomEvent('kj.jumpToCard', { detail: { cardId: n.id } })
+                          );
+                        }
+                      : undefined
+                  }
+                  title={n.kind === 'card' ? '右クリックでキャンバス表示' : undefined}
                 >
                   {n.kind === 'group' && n.hasChildren ? (
                     <button

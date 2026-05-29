@@ -69,23 +69,33 @@ fn write_kjproj(path: String, payload: ProjectPayload) -> Result<(), String> {
     project_io::write_kjproj(&path, &payload)
 }
 
+// Write raw bytes to a path (e.g. a Word .docx generated in the renderer by the
+// `docx` JS library — the renderer can't touch the filesystem directly).
+// async so it runs off the main thread for larger payloads.
 #[tauri::command]
-fn pick_open_file<R: Runtime>(
+async fn write_bytes(path: String, contents: Vec<u8>) -> Result<(), String> {
+    std::fs::write(&path, &contents).map_err(|e| format!("write error: {e}"))
+}
+
+// async so Tauri runs these off the main thread — see file_dialog.rs for why
+// (macOS native dialog deadlocks if the main thread is blocked waiting for it).
+#[tauri::command]
+async fn pick_open_file<R: Runtime>(
     app: AppHandle<R>,
     title: Option<String>,
     filters: Option<Vec<DialogFilter>>,
 ) -> Result<Option<String>, String> {
-    file_dialog::pick_open_file(app, title, filters)
+    file_dialog::pick_open_file(app, title, filters).await
 }
 
 #[tauri::command]
-fn pick_save_file<R: Runtime>(
+async fn pick_save_file<R: Runtime>(
     app: AppHandle<R>,
     title: Option<String>,
     default_file_name: Option<String>,
     filters: Option<Vec<DialogFilter>>,
 ) -> Result<Option<String>, String> {
-    file_dialog::pick_save_file(app, title, default_file_name, filters)
+    file_dialog::pick_save_file(app, title, default_file_name, filters).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -101,6 +111,7 @@ pub fn run() {
             read_text_file,
             read_kjproj,
             write_kjproj,
+            write_bytes,
             pick_open_file,
             pick_save_file,
         ])

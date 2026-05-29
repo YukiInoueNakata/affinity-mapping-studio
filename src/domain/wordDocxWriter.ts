@@ -197,6 +197,8 @@ export async function generateWordDocBytes(
     },
     sections: [{ children }],
   });
-  const buf = await Packer.toBuffer(doc);
-  return new Uint8Array(buf);
+  // toBlob is browser-safe (WebView2 has no Node Buffer, so toBuffer would
+  // throw); jszip packs to a Blob, which we read back as bytes for Rust to write.
+  const blob = await Packer.toBlob(doc);
+  return new Uint8Array(await blob.arrayBuffer());
 }

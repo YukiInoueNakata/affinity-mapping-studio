@@ -14,6 +14,7 @@ import { TagEditorDialog } from './components/TagEditorDialog.js';
 import { VersionHistoryDialog } from './components/VersionHistoryDialog.js';
 import { SyncConnectDialog } from './components/SyncConnectDialog.js';
 import { SyncStatusBadge } from './components/SyncStatusBadge.js';
+import { syncManager, type SyncState } from './sync/syncManager.js';
 import { ExportDialog } from './components/ExportDialog.js';
 import { WordExportWizard } from './components/WordExportWizard.js';
 import { HierarchyPane } from './components/HierarchyPane.js';
@@ -94,6 +95,26 @@ export function App() {
   });
   const [recentMenuOpen, setRecentMenuOpen] = useState(false);
 
+  // (Team) Subscribe to sync state so we can gate New/Open while connected to a
+  // room.  In the studio (sync-off) build syncManager is the no-op stub, so
+  // this stays idle and nothing is gated.
+  const [syncSnapshot, setSyncSnapshot] = useState<SyncState>(() =>
+    syncManager.getState()
+  );
+  useEffect(() => syncManager.on(setSyncSnapshot), []);
+  const inRoom = !!syncSnapshot.meta;
+  const projectHasData =
+    !!project &&
+    (project.data.cards.length > 0 ||
+      project.data.source_segments.length > 0 ||
+      project.data.participants.length > 0 ||
+      project.data.groups.length > 0);
+  // While connected to a room, lock 新規/開く when the room already has data
+  // (the shared room is authoritative) OR while we don't yet know the room's
+  // state (not synced).  In an empty, synced room they stay enabled so the user
+  // can open a local project and upload it.  Not in a room → never locked.
+  const roomLocksFileOps = inRoom && (projectHasData || !syncSnapshot.synced);
+
   // Track recent files when filePath changes
   useEffect(() => {
     if (!filePath) return;
@@ -113,6 +134,19 @@ export function App() {
       if (isDirty && !confirm('未保存の変更があります。破棄して別のプロジェクトを開きますか？')) return;
       const r = await projectService.openProjectByPath(path);
       if (r) {
+        if (syncManager.isInRoom()) {
+          // Connected to an (empty) room: upload rather than just load locally.
+          try {
+            syncManager.uploadProject(r.project);
+          } catch {
+            alert(
+              'このルームには既にデータがあるため読み込めません。\n' +
+                '空のルームでのみプロジェクトを読み込めます。'
+            );
+          }
+          setRecentMenuOpen(false);
+          return;
+        }
         loadProject(r.filePath, r.project);
         setRecentMenuOpen(false);
       } else {
@@ -196,6 +230,42 @@ export function App() {
     }
   }, [placementCollapsed]);
 
+  // (#3) 画面全体のズーム.  Ctrl/Cmd + Plus/Minus/0 で UI 全体 (ペイン・リボン・
+  // キャンバス) のスケールを変える.  WebView2/Chromium の `zoom` を使う.
+  const [uiScale, setUiScale] = useState<number>(() => {
+    try {
+      const v = parseFloat(localStorage.getItem('kj.uiScale') ?? '1');
+      return Number.isFinite(v) && v > 0 ? v : 1;
+    } catch {
+      return 1;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('kj.uiScale', String(uiScale));
+    } catch {
+      // ignore
+    }
+  }, [uiScale]);
+  useEffect(() => {
+    const onZoomKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      // '=' は Shift 無しの '+' キー位置.  テンキー '+' は 'Add'.
+      if (e.key === '+' || e.key === '=' || e.key === 'Add') {
+        e.preventDefault();
+        setUiScale((s) => Math.min(2.5, Math.round((s + 0.1) * 10) / 10));
+      } else if (e.key === '-' || e.key === 'Subtract') {
+        e.preventDefault();
+        setUiScale((s) => Math.max(0.5, Math.round((s - 0.1) * 10) / 10));
+      } else if (e.key === '0') {
+        e.preventDefault();
+        setUiScale(1);
+      }
+    };
+    window.addEventListener('keydown', onZoomKey);
+    return () => window.removeEventListener('keydown', onZoomKey);
+  }, []);
+
   const onJumpTo = useCallback(
     (hit: SearchHit) => {
       if (hit.kind === 'segment') {
@@ -222,6 +292,25 @@ export function App() {
     window.addEventListener('kj.requestSourceView', handler as EventListener);
     return () =>
       window.removeEventListener('kj.requestSourceView', handler as EventListener);
+  }, [setMode]);
+
+  // (#6) 階層表示から「キャンバスで表示」: KJ モード + canvas タブへ切替えてから
+  // CanvasView がマウント済みのタイミングで kj.centerOnCard を再発行する.
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const cardId = (ev as CustomEvent).detail?.cardId as string | undefined;
+      if (!cardId) return;
+      setMode('kj');
+      setCenterTab('canvas');
+      // 次フレーム以降に CanvasView がマウントされてから中心化する.
+      window.setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent('kj.centerOnCard', { detail: { cardId } })
+        );
+      }, 120);
+    };
+    window.addEventListener('kj.jumpToCard', handler as EventListener);
+    return () => window.removeEventListener('kj.jumpToCard', handler as EventListener);
   }, [setMode]);
 
   const onNew = useCallback(() => {
@@ -252,8 +341,22 @@ export function App() {
   const onOpen = useCallback(async () => {
     if (isDirty && !confirm('未保存の変更があります。破棄して別のプロジェクトを開きますか？')) return;
     const r = await projectService.openProject();
-    if (r) loadProject(r.filePath, r.project);
-  }, [isDirty, loadProject]);
+    if (!r) return;
+    if (inRoom) {
+      // Connected to an (empty) room: upload the opened project INTO the room
+      // so it becomes the shared data, rather than replacing only our local view.
+      try {
+        syncManager.uploadProject(r.project);
+      } catch {
+        alert(
+          'このルームには既にデータがあるため読み込めません。\n' +
+            '空のルームでのみプロジェクトを読み込めます。'
+        );
+      }
+      return;
+    }
+    loadProject(r.filePath, r.project);
+  }, [isDirty, loadProject, inRoom]);
 
   const onSave = useCallback(async () => {
     if (!project) return;
@@ -873,7 +976,7 @@ export function App() {
   }, [title]);
 
   return (
-    <div className="app-root">
+    <div className="app-root" style={uiScale !== 1 ? { zoom: uiScale } : undefined}>
       <header className="app-header ribbon-header">
         <div className="ribbon-row-1">
           <div className="app-title">{title}</div>
@@ -969,7 +1072,17 @@ export function App() {
           {ribbonTab === 'file' && (
             <>
               <RibbonSection label="ファイル">
-                <button type="button" className="rb-btn-lg" onClick={onNew}>
+                <button
+                  type="button"
+                  className="rb-btn-lg"
+                  onClick={onNew}
+                  disabled={roomLocksFileOps}
+                  title={
+                    roomLocksFileOps
+                      ? 'サーバー接続中（ルームにデータあり）は新規作成できません'
+                      : undefined
+                  }
+                >
                   <span className="rb-glyph">＋</span>
                   <span>新規</span>
                 </button>
@@ -978,9 +1091,17 @@ export function App() {
                     type="button"
                     className="rb-btn-lg"
                     onClick={onOpen}
+                    disabled={roomLocksFileOps}
+                    title={
+                      roomLocksFileOps
+                        ? 'サーバー接続中（ルームにデータあり）は開けません'
+                        : inRoom
+                          ? '既存プロジェクトを開いてこの空ルームに読み込みます'
+                          : undefined
+                    }
                   >
                     <span className="rb-glyph">▤</span>
-                    <span>開く</span>
+                    <span>{inRoom && !roomLocksFileOps ? 'ルームに読込' : '開く'}</span>
                   </button>
                   {recentFiles.length > 0 && (
                     <button

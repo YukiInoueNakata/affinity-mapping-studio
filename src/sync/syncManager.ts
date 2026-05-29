@@ -6,12 +6,25 @@
 // the React UI talks to (via the useSyncManager hook).
 
 import * as Y from 'yjs';
+import { IndexeddbPersistence } from 'y-indexeddb';
 import { YjsSyncBridge } from './yjsBridge.js';
 import {
   YjsWebsocketProvider,
   type ProviderStatus,
 } from './yWebsocketProvider.js';
 import { useProjectStore } from '../stores/projectStore.js';
+import type { ProjectFile } from '@shared/types/project';
+
+/** True if the Y.Doc's `tables` map already holds any records — i.e. data was
+ *  restored from the local IndexedDB cache (or otherwise present). */
+function docHasData(doc: Y.Doc): boolean {
+  const tables = doc.getMap('tables');
+  let has = false;
+  tables.forEach((v) => {
+    if (v instanceof Y.Array && v.length > 0) has = true;
+  });
+  return has;
+}
 
 export interface ConnectOptions {
   serverUrl: string;
@@ -51,6 +64,7 @@ class SyncManager {
   private listeners = new Set<(s: SyncState) => void>();
   private bridge: YjsSyncBridge | null = null;
   private provider: YjsWebsocketProvider | null = null;
+  private idb: IndexeddbPersistence | null = null;
   private unsubProvider: (() => void) | null = null;
 
   getState(): SyncState {
@@ -68,6 +82,20 @@ class SyncManager {
     this.disconnect();
 
     const doc = new Y.Doc();
+
+    // CRDT-first: load the room's local IndexedDB cache into the doc BEFORE
+    // attaching the bridge or connecting the socket.  This gives instant load,
+    // offline editing, and automatic merge on reconnect.  We await the initial
+    // cache load so `docHasData` reflects the cached state.
+    const idb = new IndexeddbPersistence(`kj-room-${opts.roomId}`, doc);
+    this.idb = idb;
+    try {
+      await idb.whenSynced;
+    } catch {
+      // If IndexedDB is unavailable (e.g. private mode) just continue online.
+    }
+    const hadCache = docHasData(doc);
+
     const bridge = new YjsSyncBridge(doc);
     const provider = new YjsWebsocketProvider({
       serverUrl: opts.serverUrl,
@@ -86,7 +114,14 @@ class SyncManager {
     this.provider = provider;
 
     // Connect the bridge to the store so applyCommand / observe flow.
-    useProjectStore.getState().attachSyncBridge(bridge);
+    // CRITICAL: only seed the store's project INTO the doc when the doc is
+    // empty.  When the cache restored data (hadCache), seeding would delete it
+    // and propagate destructive CRDT deletes to the server.  Instead we hydrate
+    // the store FROM the doc so the cached/offline data shows immediately.
+    useProjectStore.getState().attachSyncBridge(bridge, { seed: !hadCache });
+    if (hadCache) {
+      useProjectStore.getState().hydrateFromBridge(bridge);
+    }
 
     this.setState({
       status: 'connecting',
@@ -116,6 +151,15 @@ class SyncManager {
 
     provider.connect();
 
+    // When the local cache already has data we can let the user work offline
+    // immediately — resolve without waiting for the server.  The provider keeps
+    // retrying in the background and merges server state when it arrives.
+    if (hadCache) {
+      return Promise.resolve();
+    }
+
+    // No cache (first join / brand-new room): we need the server's first sync
+    // to know the room's state, so wait for it (or fail).
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         unsub();
@@ -135,6 +179,33 @@ class SyncManager {
     });
   }
 
+  /** True while attached to a room (online OR offline-with-cache). */
+  isInRoom(): boolean {
+    return this.bridge !== null;
+  }
+
+  /** True if the connected room's Y.Doc already holds data. */
+  roomHasData(): boolean {
+    return this.bridge !== null && docHasData(this.bridge.doc);
+  }
+
+  /** Upload a locally-opened project INTO the connected (empty) room.  Seeds
+   *  the room's Y.Doc from the project so it propagates to the server and other
+   *  peers.  Refuses if the room already has data, since seeding deletes then
+   *  re-adds table contents and would otherwise wipe the shared room. */
+  uploadProject(project: ProjectFile): void {
+    if (!this.bridge) throw new Error('not connected to a room');
+    if (docHasData(this.bridge.doc)) {
+      throw new Error('room already has data — refusing to overwrite');
+    }
+    const store = useProjectStore.getState();
+    store.loadProject(null, project);
+    const bridge = this.bridge;
+    bridge.applyLocal(() => {
+      bridge.seedFromProjectData(project.data, project.metadata);
+    });
+  }
+
   disconnect(): void {
     if (this.unsubProvider) {
       this.unsubProvider();
@@ -149,6 +220,11 @@ class SyncManager {
       // Detach store first so its observer is removed
       useProjectStore.getState().attachSyncBridge(null);
       this.bridge = null;
+    }
+    if (this.idb) {
+      // destroy() stops syncing but keeps the cached data on disk for next time.
+      void this.idb.destroy();
+      this.idb = null;
     }
     if (this.state.status !== 'idle') {
       this.setState(INITIAL_STATE);

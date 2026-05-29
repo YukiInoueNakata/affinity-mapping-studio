@@ -125,6 +125,8 @@ export function buildMergedCard(data: ProjectData, input: MergeCardsInput): Merg
     body,
     status: 'active',
     placement: 'canvas',
+    // (#7) record the source serials so the UI can show "← 003,005"
+    mergedFrom: sortedOld.map((c) => c.serialNumber),
     createdAt: input.now,
     updatedAt: input.now,
   };

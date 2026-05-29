@@ -12,6 +12,16 @@
   --selection: rgba(78, 161, 255, 0.25);
 }
 
+/* (#8) キーボードスクロール領域 (useKeyboardScroll). マウスクリックでフォーカス
+   しても枠は出さず, Tab 等のキーボードフォーカス時のみ薄く強調する. */
+[data-kbscroll]:focus {
+  outline: none;
+}
+[data-kbscroll]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -601,6 +611,15 @@ textarea {
   content: '';
   display: block;
   height: 2px;
+}
+
+/* (#9) 右ペイン (カード詳細) の各セクションは高さ手動調整を無効化.
+ * カード詳細 / 原文参照 の間のリサイズハンドルは不要との要望. 自然な高さ +
+ * 必要時スクロールに任せる. */
+.right-panel .panel-section {
+  resize: none;
+  height: auto;
+  max-height: 50vh;
 }
 
 /* Search section: also section-level scroll + resize so its scrollbar
@@ -1324,6 +1343,10 @@ textarea {
 
 .placement-list {
   flex: 1;
+  /* min-height: 0 is required so this flex child can shrink below its content
+   * height — otherwise overflow-y: auto never engages and the scrollbar never
+   * appears when there are many cards. (#4) */
+  min-height: 0;
   overflow-y: auto;
   padding: 6px;
 }
@@ -1439,6 +1462,14 @@ textarea {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* (#7) merged-card provenance sub-label, e.g. "← 003,005" */
+.card-node-merged-from {
+  font-weight: 400;
+  font-size: 9px;
+  color: #aaa;
+  letter-spacing: 0;
 }
 
 .card-collapse-btn {

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import { flattenGroupTree, getGroupLabel, getUngroupedCards, levelPrefix } from '../domain/groups.js';
+import { makeRenameParticipantCommand } from '../stores/commands.js';
 import { SearchPanel } from './SearchPanel.js';
 import type { SearchHit } from '../domain/search.js';
 
@@ -18,6 +19,38 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
   const selectGroup = useProjectStore((s) => s.selectGroup);
   const selectParticipant = useProjectStore((s) => s.selectParticipant);
   const selectSegment = useProjectStore((s) => s.selectSegment);
+  const applyCommand = useProjectStore((s) => s.applyCommand);
+
+  // (#2) 参加者名のインライン編集 (右クリックで開始)
+  const [renamingPid, setRenamingPid] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+
+  const commitRename = (pid: string) => {
+    if (!project) {
+      setRenamingPid(null);
+      return;
+    }
+    const target = project.data.participants.find((p) => p.id === pid);
+    if (!target) {
+      setRenamingPid(null);
+      return;
+    }
+    const next = renameDraft.trim();
+    if (next.length === 0 || next === target.displayName) {
+      setRenamingPid(null);
+      return;
+    }
+    // 重複チェック: 別の参加者と displayName が被ったらエラー
+    const collision = project.data.participants.some(
+      (p) => p.id !== pid && p.displayName.trim() === next
+    );
+    if (collision) {
+      alert(`「${next}」は別の協力者と重複しています．別の名前にしてください．`);
+      return;
+    }
+    applyCommand(makeRenameParticipantCommand(pid, target.displayName, next));
+    setRenamingPid(null);
+  };
 
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
 
@@ -123,9 +156,34 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
             <li
               key={p.id}
               className={selectedParticipantId === p.id ? 'active' : ''}
-              onClick={() => selectParticipant(p.id)}
+              onClick={() => {
+                if (renamingPid !== p.id) selectParticipant(p.id);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setRenameDraft(p.displayName);
+                setRenamingPid(p.id);
+              }}
+              title="右クリックで名前を変更"
             >
-              <strong>{p.code}</strong> {p.displayName}
+              <strong>{p.code}</strong>{' '}
+              {renamingPid === p.id ? (
+                <input
+                  type="text"
+                  value={renameDraft}
+                  autoFocus
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onBlur={() => commitRename(p.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename(p.id);
+                    else if (e.key === 'Escape') setRenamingPid(null);
+                  }}
+                  style={{ width: '60%', fontSize: 11 }}
+                />
+              ) : (
+                p.displayName
+              )}
               <span className="counts">
                 seg {segmentCountByParticipant.get(p.id) ?? 0} / card{' '}
                 {cardCountByParticipant.get(p.id) ?? 0}

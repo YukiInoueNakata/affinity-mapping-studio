@@ -96,8 +96,24 @@ export interface ProjectStoreState {
   setSnapshots(snapshots: import('@shared/types/project').Snapshot[]): void;
 
   /** Phase 4b-3c: attach a YjsSyncBridge so local edits propagate to a shared
-   *  Y.Doc and remote changes flow back into the store.  Pass null to detach. */
-  attachSyncBridge(bridge: YjsSyncBridge | null): void;
+   *  Y.Doc and remote changes flow back into the store.  Pass null to detach.
+   *
+   *  `opts.seed` controls whether the currently-loaded ProjectData is pushed
+   *  INTO the Y.Doc on attach.  This MUST be false when the Y.Doc already holds
+   *  data (e.g. restored from the local IndexedDB cache): seeding calls
+   *  seedFromProjectData which deletes existing table contents, and those
+   *  deletes are real CRDT ops that would propagate to the server and wipe
+   *  everyone's data.  Default true preserves the "populate a brand-new empty
+   *  room from my open project" path. */
+  attachSyncBridge(
+    bridge: YjsSyncBridge | null,
+    opts?: { seed?: boolean }
+  ): void;
+  /** Phase 4 (CRDT-first): copy the Y.Doc's current contents into the store
+   *  without echoing back to the doc.  Used after the local IndexedDB cache has
+   *  loaded into a freshly-attached bridge (whose observe() did not fire for the
+   *  already-applied cache transactions), so offline data shows immediately. */
+  hydrateFromBridge(bridge: YjsSyncBridge): void;
 }
 
 function withData(project: ProjectFile, data: ProjectData): ProjectFile {
@@ -366,7 +382,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     });
   },
 
-  attachSyncBridge(bridge) {
+  attachSyncBridge(bridge, opts) {
     // Detach any existing bridge first
     if (_unsubscribeRemote) {
       _unsubscribeRemote();
@@ -378,8 +394,12 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     // Seed the bridge with the currently-loaded ProjectData (if any) so the
     // first remote peer sees our state.  This itself triggers Y.Doc updates
     // but they are tagged with localOrigin and won't echo back through observe.
+    // CRITICAL: skip seeding when the caller says so (opts.seed === false) —
+    // see the interface doc.  Seeding over an already-populated Y.Doc would
+    // delete its contents and propagate destructive CRDT ops to the server.
+    const seed = opts?.seed !== false;
     const { project } = get();
-    if (project) {
+    if (seed && project) {
       bridge.applyLocal(() => {
         bridge.seedFromProjectData(project.data, project.metadata);
       });
@@ -390,7 +410,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         groups: project.data.groups.length,
       });
     } else {
-      console.debug('[sync] attachSyncBridge: no project loaded — empty seed');
+      console.debug('[sync] attachSyncBridge: seed skipped', {
+        seed,
+        hasProject: !!project,
+      });
     }
 
     // Mirror remote-originated changes into the store.  We temporarily set
@@ -409,6 +432,26 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         _applyingRemote = false;
       }
     });
+  },
+
+  hydrateFromBridge(bridge) {
+    const { project: cur } = get();
+    if (!cur) return;
+    _applyingRemote = true;
+    try {
+      const data = bridge.toProjectData();
+      const meta = bridge.toMetadata();
+      set({
+        project: {
+          ...withData(cur, data),
+          metadata: meta ? { ...cur.metadata, ...meta } : cur.metadata,
+        },
+        // Cache load is not a user edit; don't mark dirty.
+        isDirty: false,
+      });
+    } finally {
+      _applyingRemote = false;
+    }
   },
 }));
 

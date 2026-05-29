@@ -12,6 +12,7 @@ import {
   makeCreateCardsCommand,
   makeCreateFreeCardCommand,
   makeDeleteCardCommand,
+  makeDeleteFileCommand,
   makeDeleteSegmentCommand,
   makeDeleteSegmentsBulkCommand,
   makeEditCardBodyCommand,
@@ -33,6 +34,7 @@ import {
 } from '../domain/segments.js';
 import type { Card, ProjectData } from '@shared/types/domain';
 import { effectivePlacement, PLACEMENT_LABELS } from '../domain/cards.js';
+import { useKeyboardScroll } from '../hooks/useKeyboardScroll.js';
 
 type EditMode =
   | { kind: 'none' }
@@ -64,6 +66,7 @@ export function SourceViewer() {
   const selectCard = useProjectStore((s) => s.selectCard);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const lastClickedSegmentIdxRef = useRef<number>(-1);
+  const kbScroll = useKeyboardScroll();
   const [selection, setSelection] = useState<SourceSelectionState | null>(null);
   const [editMode, setEditMode] = useState<EditMode>({ kind: 'none' });
   const [cardContext, setCardContext] = useState<{
@@ -690,23 +693,40 @@ export function SourceViewer() {
 
   function deleteFileSegments(fileName: string) {
     if (!project) return;
-    const targets = project.data.source_segments.filter(
+    const data = project.data;
+    const targets = data.source_segments.filter(
       (s) => s.sourceFile === fileName && s.deletedAt === null
     );
     if (targets.length === 0) return;
+    const targetIds = new Set(targets.map((s) => s.id));
+    // (#1) このファイルにセグメントを持つ参加者のうち，削除後に「残る active
+    // セグメント無し かつ カード無し」になる参加者を孤立として一緒に削除する.
+    const fileParticipantIds = new Set(targets.map((s) => s.participantId));
+    const orphaned = data.participants.filter((p) => {
+      if (!fileParticipantIds.has(p.id)) return false;
+      const hasOtherActiveSeg = data.source_segments.some(
+        (s) => s.participantId === p.id && s.deletedAt === null && !targetIds.has(s.id)
+      );
+      if (hasOtherActiveSeg) return false;
+      const hasCards = data.cards.some((c) => c.participantId === p.id);
+      return !hasCards;
+    });
+    const partNote =
+      orphaned.length > 0 ? `\nカードの無い参加者 ${orphaned.length} 名も削除されます．` : '';
     if (
       !confirm(
-        `ファイル「${fileName}」の ${targets.length} 件のセグメントをすべて削除しますか？ (Undo で復元できます)`
+        `ファイル「${fileName}」の ${targets.length} 件のセグメントをすべて削除しますか？${partNote}\n(Undo で復元できます)`
       )
     )
       return;
     const prev: Record<string, string | null> = {};
     for (const s of targets) prev[s.id] = s.deletedAt;
     applyCommand(
-      makeDeleteSegmentsBulkCommand(
+      makeDeleteFileCommand(
         targets.map((s) => s.id),
         new Date().toISOString(),
-        prev
+        prev,
+        orphaned
       )
     );
   }
@@ -1009,6 +1029,7 @@ export function SourceViewer() {
       </div>
       <div
         className={`source-viewer-list ${readMode === 'continuous' ? 'continuous-mode' : ''}`}
+        {...kbScroll}
       >
         {displaySegments.length === 0 && segments.length > 0 && (
           <div className="muted" style={{ padding: 12 }}>

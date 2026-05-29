@@ -543,6 +543,72 @@ export function makeDeleteSegmentsBulkCommand(
 }
 
 /**
+ * (#2) Rename a participant's displayName.  Uniqueness must be checked by the
+ * caller before applying (this command does not validate).
+ */
+export function makeRenameParticipantCommand(
+  participantId: string,
+  prevName: string,
+  nextName: string
+): DomainCommand {
+  return {
+    label: `参加者名変更: ${prevName || '(空)'} → ${nextName}`,
+    apply: (d) => ({
+      ...d,
+      participants: d.participants.map((p) =>
+        p.id === participantId ? { ...p, displayName: nextName } : p
+      ),
+    }),
+    revert: (d) => ({
+      ...d,
+      participants: d.participants.map((p) =>
+        p.id === participantId ? { ...p, displayName: prevName } : p
+      ),
+    }),
+  };
+}
+
+/**
+ * (#1) Delete a whole imported file: soft-delete its segments AND remove any
+ * participants that become orphaned (no remaining active segments and no
+ * cards).  Caller computes `orphanedParticipants`.  Undo restores both.
+ */
+export function makeDeleteFileCommand(
+  segmentIds: string[],
+  now: string,
+  prevDeletedAtById: Record<string, string | null>,
+  orphanedParticipants: Participant[]
+): DomainCommand {
+  const targets = new Set(segmentIds);
+  const orphanIds = new Set(orphanedParticipants.map((p) => p.id));
+  const partLabel =
+    orphanedParticipants.length > 0 ? ` + ${orphanedParticipants.length} 参加者` : '';
+  return {
+    label: `ファイル削除: ${segmentIds.length} セグメント${partLabel}`,
+    apply: (d) => ({
+      ...d,
+      source_segments: d.source_segments.map((s) =>
+        targets.has(s.id) ? { ...s, deletedAt: now } : s
+      ),
+      participants:
+        orphanIds.size > 0
+          ? d.participants.filter((p) => !orphanIds.has(p.id))
+          : d.participants,
+    }),
+    revert: (d) => ({
+      ...d,
+      source_segments: d.source_segments.map((s) =>
+        targets.has(s.id) ? { ...s, deletedAt: prevDeletedAtById[s.id] ?? null } : s
+      ),
+      participants:
+        orphanedParticipants.length > 0
+          ? [...d.participants, ...orphanedParticipants]
+          : d.participants,
+    }),
+  };
+}
+
+/**
  * Set/clear the speaker label on a segment. Pure in-place mutation,
  * no versioning (cheap edit).
  */

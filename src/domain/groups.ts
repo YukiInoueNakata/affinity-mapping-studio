@@ -402,6 +402,94 @@ export function computeGroupAutoBounds(
   };
 }
 
+export interface PackGroupCardsOptions {
+  measuredSizes?: Map<string, { width: number; height: number }>;
+  defaultCardWidth?: number;
+  defaultCardHeight?: number;
+  /** Gap between packed cards (px). */
+  gap?: number;
+}
+
+/**
+ * (#3) グループのメンバーカードを，グループ枠の現在の左上 (= ラベル位置) を固定した
+ * まま隙間なくグリッド整列する．現在の表示順 (上→下, 左→右) を保持し，列数はおおよそ
+ * 正方形になるよう自動決定する．各行の高さはその行の最大カード高に揃える．
+ *
+ * 戻り値の cardTargets を `makeMoveCardsBulkCommand` に渡し，枠の再フィットは
+ * `computeCascadedGroupBoundsUpdates` に新カード位置を渡して算出する (パッキングで
+ * カードを枠左上 + padding から並べるため，再フィット後も枠の x,y は不変になる)．
+ *
+ * メンバーカードのみを対象とし，子グループは移動しない (典型ユースケースは葉グループ)．
+ */
+export function packGroupCards(
+  data: ProjectData,
+  groupId: string,
+  options: PackGroupCardsOptions = {}
+): { cardTargets: Array<{ cardId: string; x: number; y: number }> } | null {
+  const pos = data.group_positions.find((p) => p.groupId === groupId);
+  if (!pos) return null;
+  const measured = options.measuredSizes ?? new Map();
+  const dcw = options.defaultCardWidth ?? DEFAULT_CARD_W;
+  const dch = options.defaultCardHeight ?? DEFAULT_CARD_H;
+  const gap = options.gap ?? 12;
+
+  const memberIds = data.group_memberships
+    .filter((m) => m.groupId === groupId)
+    .map((m) => m.cardId);
+  const items = memberIds
+    .map((cid) => {
+      const card = data.cards.find((c) => c.id === cid);
+      if (!card) return null;
+      if ((card.placement ?? 'canvas') !== 'canvas') return null;
+      const p = data.card_positions.find((cp) => cp.cardId === cid);
+      if (!p) return null;
+      const m = measured.get(cid);
+      const w = m?.width ?? (card.collapsed ? DEFAULT_COLLAPSED_CARD_W : dcw);
+      const h = m?.height ?? (card.collapsed ? DEFAULT_COLLAPSED_CARD_H : dch);
+      return { cardId: cid, x: p.x, y: p.y, w, h };
+    })
+    .filter((v): v is { cardId: string; x: number; y: number; w: number; h: number } => v !== null);
+  if (items.length === 0) return null;
+
+  // 現在の表示順 (上→下, 同程度の高さなら左→右) を保持
+  items.sort((a, b) => (Math.abs(a.y - b.y) > 20 ? a.y - b.y : a.x - b.x));
+
+  const n = items.length;
+  const cols = Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n))));
+  const colWidth = Math.max(...items.map((it) => it.w));
+
+  const startX = pos.x + GROUP_AUTOFIT_PADDING;
+  const startY = pos.y + GROUP_AUTOFIT_PADDING;
+
+  const rowCount = Math.ceil(n / cols);
+  const rowHeights: number[] = [];
+  for (let r = 0; r < rowCount; r++) {
+    let maxH = dch;
+    for (let c = 0; c < cols; c++) {
+      const it = items[r * cols + c];
+      if (it) maxH = Math.max(maxH, it.h);
+    }
+    rowHeights.push(maxH);
+  }
+  const rowY: number[] = [];
+  let acc = startY;
+  for (let r = 0; r < rowCount; r++) {
+    rowY.push(acc);
+    acc += rowHeights[r] + gap;
+  }
+
+  const cardTargets = items.map((it, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    return {
+      cardId: it.cardId,
+      x: startX + col * (colWidth + gap),
+      y: rowY[row],
+    };
+  });
+  return { cardTargets };
+}
+
 /**
  * Given a set of card position overrides (cards that just moved), compute the
  * cascaded GroupPosition updates for all touched ancestor groups, bottom-up,

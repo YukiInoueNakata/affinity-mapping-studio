@@ -33,7 +33,7 @@ const defaults: PersistedForm = {
 };
 
 export function SyncConnectDialog({ open, onClose }: Props) {
-  const { state, connect } = useSyncManager();
+  const { state, connect, disconnect } = useSyncManager();
   const [form, setForm] = useState<PersistedForm>(loadPersisted);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,8 +75,22 @@ export function SyncConnectDialog({ open, onClose }: Props) {
     }
   };
 
+  // 接続中でも中断できるように: disconnect で in-flight 接続を切ってから閉じる.
+  // (connect() の Promise が hang していても abort できる)
+  const handleCancel = () => {
+    if (busy) {
+      try {
+        disconnect();
+      } catch {
+        // ignore
+      }
+      setBusy(false);
+    }
+    onClose();
+  };
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={handleCancel}>
       <div
         className="modal"
         onClick={(e) => e.stopPropagation()}
@@ -154,8 +168,8 @@ export function SyncConnectDialog({ open, onClose }: Props) {
           )}
         </div>
         <footer className="modal-footer">
-          <button type="button" onClick={onClose} disabled={busy}>
-            キャンセル
+          <button type="button" onClick={handleCancel}>
+            {busy ? '中断' : 'キャンセル'}
           </button>
           <button
             type="button"

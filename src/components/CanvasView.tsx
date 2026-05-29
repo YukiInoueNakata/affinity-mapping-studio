@@ -30,6 +30,7 @@ import {
   makeDeleteGroupCommand,
   makeMergeCardsCommand,
   makeMoveCardCommand,
+  makeMoveCardsBulkCommand,
   makeMoveGroupWithChildrenCommand,
   makeNestGroupsCommand,
   makeNestIntoExistingGroupCommand,
@@ -50,6 +51,8 @@ import {
   buildParentGroup,
   collectGroupDescendantsForDrag,
   computeCascadedGroupBoundsUpdates,
+  computeGroupAutoBounds,
+  packGroupCards,
   getContainerGroupIds,
   getGroupLabel,
   getGroupPosition,
@@ -85,7 +88,7 @@ export function CanvasView() {
 }
 
 function CanvasViewImpl() {
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, setCenter } = useReactFlow();
 
   useEffect(() => {
     const handler = () => {
@@ -94,6 +97,41 @@ function CanvasViewImpl() {
     window.addEventListener('kj.requestFitView', handler);
     return () => window.removeEventListener('kj.requestFitView', handler);
   }, [fitView]);
+
+  // (#5) 未分類/保留ペインがカードをキャンバスに配置する際に使う「現在の表示中心
+  // (flow 座標)」を取得する関数を公開する.  CanvasView がマウントされている間だけ
+  // 有効. 未マウント時 (原文ビューアタブ等) は CardPlacementPane 側が fallback.
+  useEffect(() => {
+    (window as unknown as { __kjGetCanvasCenter?: () => { x: number; y: number } | null }).
+      __kjGetCanvasCenter = () => {
+      const el = document.querySelector('.react-flow');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    };
+    return () => {
+      delete (window as unknown as { __kjGetCanvasCenter?: unknown }).__kjGetCanvasCenter;
+    };
+  }, [screenToFlowPosition]);
+
+  // (#6) 階層表示などから「キャンバスでこのカードを表示」: ビューを移動 + 選択.
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const cardId = (ev as CustomEvent).detail?.cardId as string | undefined;
+      if (!cardId) return;
+      const proj = useProjectStore.getState().project;
+      if (!proj) return;
+      useProjectStore.getState().selectCard(cardId);
+      const pos = proj.data.card_positions.find((p) => p.cardId === cardId);
+      if (pos) {
+        setCenter(pos.x, pos.y, { zoom: 1, duration: 400 });
+      } else {
+        fitView({ padding: 0.2, duration: 300 });
+      }
+    };
+    window.addEventListener('kj.centerOnCard', handler as EventListener);
+    return () => window.removeEventListener('kj.centerOnCard', handler as EventListener);
+  }, [setCenter, fitView]);
 
   const project = useProjectStore((s) => s.project);
   const selectedCardId = useProjectStore((s) => s.selectedCardId);
@@ -241,6 +279,7 @@ function CanvasViewImpl() {
             effectiveBorderStyle: cardStyle?.borderStyle,
             maxChars: settings?.cardMaxChars,
             collapsed,
+            mergedFrom: c.mergedFrom,
           },
           selected: isSelected,
           zIndex: 10,
@@ -638,7 +677,7 @@ function CanvasViewImpl() {
           synthesized,
           new Map(),
           groupOverride,
-          { defaultCardWidth: cardWrapWidth }
+          { defaultCardWidth: cardWrapWidth, measuredSizes: getMeasuredSizes() }
         );
       }
       applyCommand(
@@ -646,7 +685,58 @@ function CanvasViewImpl() {
       );
       setContextMenu(null);
     },
-    [project, applyCommand]
+    [project, applyCommand, getMeasuredSizes]
+  );
+
+  // (#3) ラベル位置 (グループ枠の左上) を固定したまま，メンバーカードを隙間なく
+  // グリッド整列する．枠は再フィットで縮むが x,y は不変なのでラベルは動かない．
+  const alignGroupToLabel = useCallback(
+    (groupId: string) => {
+      if (!project) return;
+      const cardWrapWidth = project.metadata.displaySettings?.cardWrapWidth;
+      const packed = packGroupCards(project.data, groupId, {
+        measuredSizes: getMeasuredSizes(),
+        defaultCardWidth: cardWrapWidth,
+      });
+      if (!packed || packed.cardTargets.length === 0) {
+        setContextMenu(null);
+        return;
+      }
+      const moves = packed.cardTargets
+        .map((t) => {
+          const cur = project.data.card_positions.find(
+            (p) => p.cardId === t.cardId
+          );
+          if (!cur) return null;
+          if (cur.x === t.x && cur.y === t.y) return null;
+          return {
+            cardId: t.cardId,
+            from: { x: cur.x, y: cur.y },
+            to: { x: t.x, y: t.y },
+          };
+        })
+        .filter(
+          (m): m is { cardId: string; from: { x: number; y: number }; to: { x: number; y: number } } =>
+            m !== null
+        );
+      if (moves.length === 0) {
+        setContextMenu(null);
+        return;
+      }
+      // このグループ + 祖先の枠を新カード位置から再フィット (枠 x,y は不変)．
+      const cardOverride = new Map(
+        packed.cardTargets.map((t) => [t.cardId, { x: t.x, y: t.y }] as const)
+      );
+      const groupBoundsUpdates = computeCascadedGroupBoundsUpdates(
+        project.data,
+        cardOverride,
+        new Map(),
+        { measuredSizes: getMeasuredSizes(), defaultCardWidth: cardWrapWidth }
+      );
+      applyCommand(makeMoveCardsBulkCommand(moves, groupBoundsUpdates));
+      setContextMenu(null);
+    },
+    [project, applyCommand, getMeasuredSizes]
   );
 
   const unnestFromParent = useCallback(
@@ -1094,17 +1184,37 @@ function CanvasViewImpl() {
       cardPositions,
       now,
     });
+    // (#2) buildGroupFromCards はデフォルトのカードサイズで枠を算出するため，実際の
+    // 描画サイズと合わず「一度動かさないと枠がフィットしない」状態になる．ここで
+    // 測定済みサイズを使って即座にフィットさせる．
+    const cardWrapWidth = project.metadata.displaySettings?.cardWrapWidth;
+    const synthesized = {
+      ...project.data,
+      groups: [...project.data.groups, out.group],
+      group_memberships: [
+        ...project.data.group_memberships.filter(
+          (m) => !out.conflictingMemberships.some((c) => c.id === m.id)
+        ),
+        ...out.memberships,
+      ],
+      group_positions: [...project.data.group_positions, out.position],
+    };
+    const fitted = computeGroupAutoBounds(synthesized, out.group.id, {
+      measuredSizes: getMeasuredSizes(),
+      defaultCardWidth: cardWrapWidth,
+    });
+    const position = fitted ? { groupId: out.group.id, ...fitted } : out.position;
     applyCommand(
       makeCreateGroupCommand(
         out.group,
         out.label,
-        out.position,
+        position,
         out.memberships,
         out.conflictingMemberships
       )
     );
     selectGroup(out.group.id);
-  }, [project, selectedCardIds, nodes, applyCommand, selectGroup]);
+  }, [project, selectedCardIds, nodes, applyCommand, selectGroup, getMeasuredSizes]);
 
   // Selection of a single group + cards changes the group button into
   // "add cards to that group" mode.
@@ -1294,6 +1404,14 @@ function CanvasViewImpl() {
             const g = project?.data.groups.find((x) => x.id === contextMenu.groupId);
             return (
               <>
+                <button
+                  type="button"
+                  onClick={() => alignGroupToLabel(contextMenu.groupId)}
+                  title="ラベル位置を固定したまま, メンバーカードを隙間なくグリッド整列"
+                >
+                  ラベルに合わせて整列
+                </button>
+                <div className="card-context-menu-sep" />
                 <button
                   type="button"
                   onClick={() => dissolveGroup(contextMenu.groupId)}

@@ -64,6 +64,10 @@ export interface Card {
   displayStyle?: DisplayStyle;
   /** When true, the card is rendered as ID-only (body hidden) on the canvas. */
   collapsed?: boolean;
+  /** (#7) For merged cards: the serial numbers of the source cards this card
+   * was created from.  Shown as a provenance sub-label (e.g. "← 003,005").
+   * Absent for normal (non-merged) cards. */
+  mergedFrom?: number[];
   createdAt: ISODateString;
   updatedAt: ISODateString;
 }

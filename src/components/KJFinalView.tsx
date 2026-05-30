@@ -26,6 +26,7 @@ import 'reactflow/dist/style.css';
 import { useProjectStore } from '../stores/projectStore.js';
 import { GroupNode, type GroupNodeData } from './GroupNode.js';
 import { GroupMemberPanel } from './GroupMemberPanel.js';
+import { KJFinalAnnotationCard } from './KJFinalAnnotationCard.js';
 import { RelationEdge, type RelationEdgeData } from './RelationEdge.js';
 import { makeSetFinalGroupLayoutCommand } from '../stores/commands.js';
 import {
@@ -185,7 +186,7 @@ function KJFinalViewImpl() {
 
   return (
     <div className="kj-final-view" style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-      <div className="canvas-flow" style={{ flex: 1, minHeight: 0 }}>
+      <div className="canvas-flow" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <ReactFlow
           nodes={rfNodes}
           edges={edges}
@@ -204,6 +205,7 @@ function KJFinalViewImpl() {
           <Controls />
           <MiniMap pannable zoomable />
         </ReactFlow>
+        <KJFinalAnnotationCard />
       </div>
       <GroupMemberPanel />
     </div>

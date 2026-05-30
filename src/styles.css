@@ -2999,3 +2999,121 @@ mark.search-match {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+
+/* 註記カード (右下) */
+.kj-final-anno {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 5;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.kj-final-anno.closed { max-width: 260px; }
+.kj-final-anno.open { width: 360px; max-height: 70vh; overflow-y: auto; }
+
+.kj-final-anno-collapsed {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.kj-final-anno-collapsed:hover { background: var(--bg-elev); }
+
+.kj-final-anno-title-line {
+  font-weight: 700;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kj-final-anno-edit-hint {
+  color: var(--accent);
+  margin-left: 8px;
+}
+
+.kj-final-anno-open { padding: 12px; }
+
+.kj-final-anno-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.kj-final-anno-head-title {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.kj-final-anno-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 6px;
+}
+
+.kj-final-anno-close:hover { color: var(--text); }
+
+.kj-final-anno-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.kj-final-anno-row.column {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.kj-final-anno-row > span {
+  width: 60px;
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.kj-final-anno-row.column > span {
+  width: auto;
+  margin-bottom: 4px;
+}
+
+.kj-final-anno-row input,
+.kj-final-anno-row textarea {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 5px 7px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.kj-final-anno-row textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.kj-final-anno-row-group {
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 8px;
+}

@@ -2103,6 +2103,69 @@ export function makeSetFinalGroupLayoutCommand(
   };
 }
 
+type FinalMetaPatch = {
+  title?: string;
+  annotation?: import('@shared/types/domain').FinalDiagramAnnotation | undefined;
+  overallNarrative?: string;
+};
+
+function withFinalMeta(data: ProjectData, patch: FinalMetaPatch): ProjectData {
+  const cur = data.final_diagram ?? { groupLayout: {}, shapes: [] };
+  const next = { ...cur };
+  // 各フィールドは明示的に上書き．undefined は削除に相当．
+  if ('title' in patch) {
+    if (patch.title === undefined || patch.title === '') {
+      delete next.title;
+    } else next.title = patch.title;
+  }
+  if ('annotation' in patch) {
+    if (patch.annotation === undefined) delete next.annotation;
+    else next.annotation = { ...patch.annotation };
+  }
+  if ('overallNarrative' in patch) {
+    if (patch.overallNarrative === undefined || patch.overallNarrative === '') {
+      delete next.overallNarrative;
+    } else next.overallNarrative = patch.overallNarrative;
+  }
+  return { ...data, final_diagram: next };
+}
+
+/** 最終図解の表題を更新する．undo/redo 可． */
+export function makeSetFinalTitleCommand(
+  prev: string | undefined,
+  next: string | undefined
+): DomainCommand {
+  return {
+    label: '最終図解: 表題更新',
+    apply: (d) => withFinalMeta(d, { title: next }),
+    revert: (d) => withFinalMeta(d, { title: prev }),
+  };
+}
+
+/** 最終図解の註記 (作成日/場所/出所/作成者) をまとめて更新する．undo/redo 可． */
+export function makeSetFinalAnnotationCommand(
+  prev: import('@shared/types/domain').FinalDiagramAnnotation | undefined,
+  next: import('@shared/types/domain').FinalDiagramAnnotation | undefined
+): DomainCommand {
+  return {
+    label: '最終図解: 註記更新',
+    apply: (d) => withFinalMeta(d, { annotation: next }),
+    revert: (d) => withFinalMeta(d, { annotation: prev }),
+  };
+}
+
+/** 最終図解の全体叙述メモを更新する．undo/redo 可． */
+export function makeSetFinalOverallNarrativeCommand(
+  prev: string | undefined,
+  next: string | undefined
+): DomainCommand {
+  return {
+    label: '最終図解: 全体叙述更新',
+    apply: (d) => withFinalMeta(d, { overallNarrative: next }),
+    revert: (d) => withFinalMeta(d, { overallNarrative: prev }),
+  };
+}
+
 /** Group.narrative (B 型叙述化の Group 単位メモ) を更新する．undo/redo 可． */
 export function makeSetGroupNarrativeCommand(
   groupId: string,

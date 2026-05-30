@@ -2071,3 +2071,47 @@ export function makeRenameGroupCommand(
     }),
   };
 }
+
+// ============================================================================
+// 最終図解 (FinalDiagram) 関連コマンド — 田中 2011 / 川喜田 1986・1997
+// ============================================================================
+
+type FinalLayoutEntry = { x: number; y: number; width?: number; height?: number };
+
+function withFinalLayoutEntry(
+  data: ProjectData,
+  groupId: string,
+  entry: FinalLayoutEntry | undefined
+): ProjectData {
+  const cur = data.final_diagram ?? { groupLayout: {}, shapes: [] };
+  const nextLayout = { ...cur.groupLayout };
+  if (entry) nextLayout[groupId] = { ...entry };
+  else delete nextLayout[groupId];
+  return { ...data, final_diagram: { ...cur, groupLayout: nextLayout } };
+}
+
+/** 最終図解ビューでグループを動かしたときの位置更新．undo/redo 可． */
+export function makeSetFinalGroupLayoutCommand(
+  groupId: string,
+  prev: FinalLayoutEntry | undefined,
+  next: FinalLayoutEntry | undefined
+): DomainCommand {
+  return {
+    label: `最終図解: グループ位置 (${groupId})`,
+    apply: (d) => withFinalLayoutEntry(d, groupId, next),
+    revert: (d) => withFinalLayoutEntry(d, groupId, prev),
+  };
+}
+
+/** 複数グループの一括移動 (整列など)． */
+export function makeSetFinalGroupLayoutBulkCommand(
+  moves: Array<{ groupId: string; prev: FinalLayoutEntry | undefined; next: FinalLayoutEntry | undefined }>
+): DomainCommand {
+  return {
+    label: `最終図解: ${moves.length} グループ位置一括`,
+    apply: (d) =>
+      moves.reduce((acc, m) => withFinalLayoutEntry(acc, m.groupId, m.next), d),
+    revert: (d) =>
+      moves.reduce((acc, m) => withFinalLayoutEntry(acc, m.groupId, m.prev), d),
+  };
+}

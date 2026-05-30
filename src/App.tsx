@@ -3,6 +3,7 @@ import { useProjectStore } from './stores/projectStore.js';
 import { LeftPanel } from './components/LeftPanel.js';
 import { SourceViewer } from './components/SourceViewer.js';
 import { CanvasView } from './components/CanvasView.js';
+import { KJFinalView } from './components/KJFinalView.js';
 import { RightPanel } from './components/RightPanel.js';
 import { ImportWizard } from './components/ImportWizard.js';
 import { PromptDialog } from './components/PromptDialog.js';
@@ -46,7 +47,7 @@ import {
   getGroupPosition,
 } from './domain/groups.js';
 
-type CenterTab = 'canvas' | 'source';
+type CenterTab = 'canvas' | 'source' | 'final';
 
 export function App() {
   const project = useProjectStore((s) => s.project);
@@ -1574,6 +1575,14 @@ export function App() {
               >
                 原文ビューア
               </button>
+              <button
+                type="button"
+                className={centerTab === 'final' ? 'tab active' : 'tab'}
+                onClick={() => setCenterTab('final')}
+                title="KJ 法 1986/1997 版 A 型図解化用ビュー"
+              >
+                最終図解
+              </button>
             </div>
           )}
         </div>
@@ -1654,7 +1663,13 @@ export function App() {
                 </button>
               )}
               <section className="center-pane">
-                {centerTab === 'canvas' ? <CanvasView /> : <SourceViewer />}
+                {centerTab === 'canvas' ? (
+                  <CanvasView />
+                ) : centerTab === 'final' ? (
+                  <KJFinalView />
+                ) : (
+                  <SourceViewer />
+                )}
               </section>
               {/* Detail-pane reopen tab gets rendered BEFORE the placement pane
                   when placement is open and right is collapsed, so it stays

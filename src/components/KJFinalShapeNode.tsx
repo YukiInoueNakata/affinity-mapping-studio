@@ -4,9 +4,12 @@
 // ラベルはダブルクリックで inline 編集．
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { type NodeProps } from 'reactflow';
+import { NodeResizer, NodeToolbar, Position, type NodeProps } from 'reactflow';
 import { useProjectStore } from '../stores/projectStore.js';
-import { makeUpdateFinalShapeCommand } from '../stores/commands.js';
+import {
+  makeDeleteFinalShapeCommand,
+  makeUpdateFinalShapeCommand,
+} from '../stores/commands.js';
 import type { FinalDiagramShape, FinalDiagramShapeKind } from '@shared/types/domain';
 import {
   RELATION_TYPE_COLORS,
@@ -57,7 +60,7 @@ function defaultGlyph(kind: FinalDiagramShapeKind): string {
   return (RELATION_TYPE_GLYPHS as Record<string, string>)[kind] ?? '';
 }
 
-export function KJFinalShapeNode({ id, data, selected }: NodeProps<KJFinalShapeNodeData>) {
+export function KJFinalShapeNode({ data, selected }: NodeProps<KJFinalShapeNodeData>) {
   const applyCommand = useProjectStore((s) => s.applyCommand);
   const shape = data.shape;
   const color = shape.color ?? defaultColor(shape.kind);
@@ -66,6 +69,47 @@ export function KJFinalShapeNode({ id, data, selected }: NodeProps<KJFinalShapeN
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(shape.label ?? '');
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const resizeStartRef = useRef<{ w: number; h: number } | null>(null);
+
+  // ---- 回転 / z-order / 色 / 削除 (NodeToolbar 用) ----
+  const rotate = (deltaDeg: number) => {
+    const next = ((shape.rotation ?? 0) + deltaDeg + 360) % 360;
+    const now = new Date().toISOString();
+    applyCommand(
+      makeUpdateFinalShapeCommand(
+        shape.id,
+        { rotation: shape.rotation ?? 0 },
+        { rotation: next },
+        now
+      )
+    );
+  };
+  const setColor = (next: string | undefined) => {
+    const now = new Date().toISOString();
+    applyCommand(
+      makeUpdateFinalShapeCommand(
+        shape.id,
+        { color: shape.color },
+        { color: next },
+        now
+      )
+    );
+  };
+  const bumpZ = (delta: number) => {
+    const next = (shape.z ?? 0) + delta;
+    const now = new Date().toISOString();
+    applyCommand(
+      makeUpdateFinalShapeCommand(
+        shape.id,
+        { z: shape.z ?? 0 },
+        { z: next },
+        now
+      )
+    );
+  };
+  const onDelete = () => {
+    applyCommand(makeDeleteFinalShapeCommand(shape));
+  };
 
   useEffect(() => {
     if (editing) {
@@ -112,6 +156,60 @@ export function KJFinalShapeNode({ id, data, selected }: NodeProps<KJFinalShapeN
         setEditing(true);
       }}
     >
+      <NodeResizer
+        isVisible={selected}
+        minWidth={30}
+        minHeight={20}
+        keepAspectRatio={false}
+        onResizeStart={(_e, params) => {
+          resizeStartRef.current = { w: params.width, h: params.height };
+        }}
+        onResizeEnd={(_e, params) => {
+          const prev = resizeStartRef.current;
+          resizeStartRef.current = null;
+          if (!prev) return;
+          if (prev.w === params.width && prev.h === params.height) return;
+          const now = new Date().toISOString();
+          applyCommand(
+            makeUpdateFinalShapeCommand(
+              shape.id,
+              { width: prev.w, height: prev.h },
+              { width: params.width, height: params.height },
+              now
+            )
+          );
+        }}
+      />
+      <NodeToolbar isVisible={selected} position={Position.Top} offset={10}>
+        <div className="kj-final-shape-toolbar">
+          <button type="button" onClick={() => rotate(-15)} title="左に 15°">↶15°</button>
+          <button type="button" onClick={() => rotate(-90)} title="左に 90°">↶90°</button>
+          <button type="button" onClick={() => rotate(90)} title="右に 90°">↷90°</button>
+          <button type="button" onClick={() => rotate(15)} title="右に 15°">↷15°</button>
+          <span className="kj-final-shape-toolbar-sep" />
+          <button type="button" onClick={() => bumpZ(1)} title="前面へ">前へ</button>
+          <button type="button" onClick={() => bumpZ(-1)} title="背面へ">後へ</button>
+          <span className="kj-final-shape-toolbar-sep" />
+          <label className="kj-final-shape-toolbar-color" title="色">
+            <input
+              type="color"
+              value={shape.color ?? defaultColor(shape.kind)}
+              onChange={(e) => setColor(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setColor(undefined)}
+            title="既定色に戻す"
+          >
+            既定
+          </button>
+          <span className="kj-final-shape-toolbar-sep" />
+          <button type="button" className="danger" onClick={onDelete} title="削除 (Delete)">
+            削除
+          </button>
+        </div>
+      </NodeToolbar>
       <ShapeBackground kind={shape.kind} color={color} />
       <div className="kj-final-shape-content" style={{ color }}>
         {shape.kind === 'text' ? (

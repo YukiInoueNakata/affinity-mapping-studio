@@ -56,6 +56,45 @@ const edgeTypes = { relation: RelationEdge };
 
 type AnyNodeData = GroupNodeData | KJFinalShapeNodeData;
 
+const FOUR_NOT_DISMISS_KEY = 'kj.finalView.fourNotDismissed';
+
+function FourNotBanner() {
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return window.localStorage.getItem(FOUR_NOT_DISMISS_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  if (dismissed) return null;
+  return (
+    <div className="kj-final-fournot">
+      <div className="kj-final-fournot-title">KJ 法を行う前に — 田中 (2011) の 4 つの NOT</div>
+      <ol className="kj-final-fournot-list">
+        <li>先行研究を当てはめない（おのれを空しくしてデータをして語らしめる）</li>
+        <li>KJ 法はカテゴリー分けの方法ではない（手段であって目的ではない）</li>
+        <li>KJ 法は 1 種類ではない（どの版を用いたか —— 1986 / 1997 など —— を明記）</li>
+        <li>評定者間一致係数は KJ 法らしくない（解釈の突き合わせが本質）</li>
+      </ol>
+      <button
+        type="button"
+        className="kj-final-fournot-close"
+        onClick={() => {
+          try {
+            window.localStorage.setItem(FOUR_NOT_DISMISS_KEY, '1');
+          } catch {
+            // ignore
+          }
+          setDismissed(true);
+        }}
+        title="今後表示しない"
+      >
+        了解 ×
+      </button>
+    </div>
+  );
+}
+
 function KJFinalViewImpl() {
   const project = useProjectStore((s) => s.project);
   const applyCommand = useProjectStore((s) => s.applyCommand);
@@ -268,6 +307,7 @@ function KJFinalViewImpl() {
     <div className={`kj-final-view ${pendingKind ? 'pending-place' : ''}`} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
       <KJFinalShapePalette pendingKind={pendingKind} onPick={setPendingKind} />
       <div className="canvas-flow" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <FourNotBanner />
         <ReactFlow
           nodes={rfNodes}
           edges={edges}

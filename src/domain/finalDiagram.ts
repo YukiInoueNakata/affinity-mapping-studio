@@ -13,7 +13,7 @@ import type {
   Group,
   GroupPosition,
   ISODateString,
-  ProjectMetadata,
+  ProjectData,
 } from '@shared/types/domain';
 import { newId } from './ids.js';
 
@@ -28,11 +28,11 @@ export function createEmptyFinalDiagram(): FinalDiagram {
   };
 }
 
-/** ProjectMetadata から FinalDiagram を取り出す．存在しなければ空を返す (旧版互換)． */
-export function getFinalDiagram(metadata: ProjectMetadata | undefined | null): FinalDiagram {
-  if (!metadata || !metadata.finalDiagram) return createEmptyFinalDiagram();
+/** ProjectData から FinalDiagram を取り出す．存在しなければ空を返す (旧版互換)． */
+export function getFinalDiagram(data: ProjectData | undefined | null): FinalDiagram {
+  if (!data || !data.final_diagram) return createEmptyFinalDiagram();
   // 部分的に欠けている場合に備えて防御的に補完．
-  const fd = metadata.finalDiagram;
+  const fd = data.final_diagram;
   return {
     title: fd.title,
     annotation: fd.annotation ? { ...fd.annotation } : undefined,

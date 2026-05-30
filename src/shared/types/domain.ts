@@ -445,6 +445,10 @@ export interface ProjectData {
   gta_codes: GtaCode[];
   gta_code_applications: GtaCodeApplication[];
   gta_categories: GtaCategory[];
+  /** KJ 法 1986/1997 版「A 型図解化」専用のデータ (schema v9 で追加)．
+   *  存在しない場合は空 (`createEmptyFinalDiagram()`) として扱う．
+   *  data 配下に置くことで，DomainCommand での undo/redo に乗る． */
+  final_diagram?: FinalDiagram;
 }
 
 export interface DisplaySettings {
@@ -461,9 +465,6 @@ export interface ProjectMetadata {
   updated_at: ISODateString;
   description: string;
   displaySettings?: DisplaySettings;
-  /** KJ 法 1986/1997 版の最終図解化 (A 型) 用の専用情報。schema v9 で追加。
-   *  存在しない場合は空 (`createEmptyFinalDiagram()`) として扱う。 */
-  finalDiagram?: FinalDiagram;
 }
 
 // ---- Final KJ diagram (schema v9) ----

@@ -12,19 +12,36 @@ import type {
   FinalDiagram,
   Group,
   GroupPosition,
-  ProjectMetadata,
+  ProjectData,
 } from '@shared/types/domain';
 
 const NOW = '2026-05-31T00:00:00.000Z';
 
-function metadataWith(finalDiagram?: FinalDiagram): ProjectMetadata {
+function dataWith(final_diagram?: FinalDiagram): ProjectData {
   return {
-    project_id: 'p-1',
-    name: 'test',
-    created_at: NOW,
-    updated_at: NOW,
-    description: '',
-    finalDiagram,
+    participants: [],
+    source_segments: [],
+    cards: [],
+    card_source_links: [],
+    card_positions: [],
+    groups: [],
+    group_memberships: [],
+    labels: [],
+    group_positions: [],
+    text_revisions: [],
+    analysis_methods: [],
+    analysis_sessions: [],
+    analytic_object_links: [],
+    m_gta_settings: [],
+    m_gta_concepts: [],
+    m_gta_variations: [],
+    m_gta_categories: [],
+    theoretical_memos: [],
+    diagram_relations: [],
+    gta_codes: [],
+    gta_code_applications: [],
+    gta_categories: [],
+    final_diagram,
   };
 }
 
@@ -39,13 +56,13 @@ describe('createEmptyFinalDiagram', () => {
 });
 
 describe('getFinalDiagram', () => {
-  it('returns empty when metadata is null/undefined (backward compat with pre-v9)', () => {
+  it('returns empty when data is null/undefined (backward compat with pre-v9)', () => {
     expect(getFinalDiagram(undefined).groupLayout).toEqual({});
     expect(getFinalDiagram(null).shapes).toEqual([]);
   });
 
-  it('returns empty when metadata has no finalDiagram (pre-v9 project)', () => {
-    expect(getFinalDiagram(metadataWith(undefined)).shapes).toEqual([]);
+  it('returns empty when data has no final_diagram (pre-v9 project)', () => {
+    expect(getFinalDiagram(dataWith(undefined)).shapes).toEqual([]);
   });
 
   it('returns a defensive copy of the diagram when present', () => {
@@ -55,7 +72,7 @@ describe('getFinalDiagram', () => {
       groupLayout: { 'g-1': { x: 10, y: 20 } },
       shapes: [],
     };
-    const out = getFinalDiagram(metadataWith(fd));
+    const out = getFinalDiagram(dataWith(fd));
     expect(out.title).toBe('My KJ');
     expect(out.annotation?.authors).toBe('中田');
     expect(out.groupLayout['g-1']).toEqual({ x: 10, y: 20 });
@@ -66,7 +83,7 @@ describe('getFinalDiagram', () => {
   it('defensively fills missing groupLayout/shapes when partial', () => {
     // simulate a corrupted file where finalDiagram is partially missing fields
     const partial = { title: 'X' } as unknown as FinalDiagram;
-    const out = getFinalDiagram(metadataWith(partial));
+    const out = getFinalDiagram(dataWith(partial));
     expect(out.groupLayout).toEqual({});
     expect(out.shapes).toEqual([]);
   });

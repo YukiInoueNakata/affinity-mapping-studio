@@ -2103,6 +2103,37 @@ export function makeSetFinalGroupLayoutCommand(
   };
 }
 
+/** Group.narrative (B 型叙述化の Group 単位メモ) を更新する．undo/redo 可． */
+export function makeSetGroupNarrativeCommand(
+  groupId: string,
+  prev: string,
+  next: string,
+  now: string,
+  prevUpdatedAt: string
+): DomainCommand {
+  return {
+    label: `叙述メモ更新 (${groupId})`,
+    apply: (d) => ({
+      ...d,
+      groups: d.groups.map((g) =>
+        g.id === groupId ? { ...g, narrative: next, updatedAt: now } : g
+      ),
+    }),
+    revert: (d) => ({
+      ...d,
+      groups: d.groups.map((g) =>
+        g.id === groupId
+          ? {
+              ...g,
+              narrative: prev === '' ? undefined : prev,
+              updatedAt: prevUpdatedAt,
+            }
+          : g
+      ),
+    }),
+  };
+}
+
 /** 複数グループの一括移動 (整列など)． */
 export function makeSetFinalGroupLayoutBulkCommand(
   moves: Array<{ groupId: string; prev: FinalLayoutEntry | undefined; next: FinalLayoutEntry | undefined }>

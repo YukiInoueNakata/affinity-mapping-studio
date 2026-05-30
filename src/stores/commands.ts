@@ -2197,6 +2197,60 @@ export function makeSetGroupNarrativeCommand(
   };
 }
 
+// ---- 図形 (FinalDiagramShape) コマンド ----------------------------------
+
+function withFinalShapes(
+  data: ProjectData,
+  mutate: (shapes: import('@shared/types/domain').FinalDiagramShape[]) => import('@shared/types/domain').FinalDiagramShape[]
+): ProjectData {
+  const cur = data.final_diagram ?? { groupLayout: {}, shapes: [] };
+  const nextShapes = mutate(cur.shapes ?? []);
+  return { ...data, final_diagram: { ...cur, shapes: nextShapes } };
+}
+
+/** 図形をパレットから新規追加する． */
+export function makeCreateFinalShapeCommand(
+  shape: import('@shared/types/domain').FinalDiagramShape
+): DomainCommand {
+  return {
+    label: `最終図解: 図形追加 (${shape.kind})`,
+    apply: (d) => withFinalShapes(d, (xs) => [...xs, shape]),
+    revert: (d) => withFinalShapes(d, (xs) => xs.filter((s) => s.id !== shape.id)),
+  };
+}
+
+/** 図形を更新する (移動 / リサイズ / 回転 / ラベル / 色 / z など)．
+ *  patch には id 以外の任意フィールドを含められる． */
+export function makeUpdateFinalShapeCommand(
+  shapeId: string,
+  prev: Partial<import('@shared/types/domain').FinalDiagramShape>,
+  next: Partial<import('@shared/types/domain').FinalDiagramShape>,
+  now: string
+): DomainCommand {
+  return {
+    label: `最終図解: 図形更新 (${shapeId})`,
+    apply: (d) =>
+      withFinalShapes(d, (xs) =>
+        xs.map((s) => (s.id === shapeId ? { ...s, ...next, updatedAt: now } : s))
+      ),
+    revert: (d) =>
+      withFinalShapes(d, (xs) =>
+        xs.map((s) => (s.id === shapeId ? { ...s, ...prev } : s))
+      ),
+  };
+}
+
+/** 図形を削除する． */
+export function makeDeleteFinalShapeCommand(
+  shape: import('@shared/types/domain').FinalDiagramShape
+): DomainCommand {
+  return {
+    label: `最終図解: 図形削除 (${shape.id})`,
+    apply: (d) => withFinalShapes(d, (xs) => xs.filter((s) => s.id !== shape.id)),
+    revert: (d) => withFinalShapes(d, (xs) => [...xs, shape]),
+  };
+}
+
 /** 複数グループの一括移動 (整列など)． */
 export function makeSetFinalGroupLayoutBulkCommand(
   moves: Array<{ groupId: string; prev: FinalLayoutEntry | undefined; next: FinalLayoutEntry | undefined }>

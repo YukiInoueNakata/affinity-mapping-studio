@@ -1,15 +1,14 @@
 // 最終図解ビュー (KJ 法 1986/1997 版「A 型図解化」専用)．
 // 田中 2011 / 川喜田 1986・1997 を参照．
 //
-// MVP スコープ (Phase 2):
-// - 独立 ReactFlow．グループ (島) のみ表示．カード非表示．
-// - 配置は data.final_diagram.groupLayout を優先．無ければ data.group_positions から流用．
+// 機能:
+// - 独立 ReactFlow．グループ (島) + 図形パレットから配置したシンボル．
+// - 配置は data.final_diagram.groupLayout / data.final_diagram.shapes に独立保持．
 // - グループ間の既存 RelationEdge を描画．
-// - グループドラッグ → makeSetFinalGroupLayoutCommand で undo/redo．
-//
-// Phase 3 以降: drill-down / 叙述メモ / 表題・註記 / 図形パレット / 4-NOT バナー．
+// - ドラッグ → undo/redo 可．Delete キーで選択中の図形を削除．
+// - 左: 図形パレット (KJ 標準記号 + 装飾)．右: メンバーカード一覧 + 叙述メモ．
 
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -17,6 +16,7 @@ import ReactFlow, {
   MiniMap,
   ReactFlowProvider,
   useNodesState,
+  useReactFlow,
   type Edge,
   type Node,
   type NodeChange,
@@ -27,69 +27,98 @@ import { useProjectStore } from '../stores/projectStore.js';
 import { GroupNode, type GroupNodeData } from './GroupNode.js';
 import { GroupMemberPanel } from './GroupMemberPanel.js';
 import { KJFinalAnnotationCard } from './KJFinalAnnotationCard.js';
-import { RelationEdge, type RelationEdgeData } from './RelationEdge.js';
-import { makeSetFinalGroupLayoutCommand } from '../stores/commands.js';
 import {
+  KJFinalShapeNode,
+  type KJFinalShapeNodeData,
+} from './KJFinalShapeNode.js';
+import { KJFinalShapePalette } from './KJFinalShapePalette.js';
+import { RelationEdge, type RelationEdgeData } from './RelationEdge.js';
+import {
+  makeCreateFinalShapeCommand,
+  makeDeleteFinalShapeCommand,
+  makeSetFinalGroupLayoutCommand,
+  makeUpdateFinalShapeCommand,
+} from '../stores/commands.js';
+import {
+  createFinalShape,
   getFinalDiagram,
   resolveFinalGroupPosition,
 } from '../domain/finalDiagram.js';
 import { getGroupLabel } from '../domain/groups.js';
 import { RELATION_TYPE_COLORS } from '../domain/relations.js';
+import type {
+  FinalDiagramShape,
+  FinalDiagramShapeKind,
+} from '@shared/types/domain';
 
-const nodeTypes = { kjgroup: GroupNode };
+const nodeTypes = { kjgroup: GroupNode, kjfinalshape: KJFinalShapeNode };
 const edgeTypes = { relation: RelationEdge };
+
+type AnyNodeData = GroupNodeData | KJFinalShapeNodeData;
 
 function KJFinalViewImpl() {
   const project = useProjectStore((s) => s.project);
   const applyCommand = useProjectStore((s) => s.applyCommand);
   const selectGroup = useProjectStore((s) => s.selectGroup);
   const selectedGroupId = useProjectStore((s) => s.selectedGroupId);
+  const { screenToFlowPosition } = useReactFlow();
 
-  // 最終図解ビューでは「グループ」のみ表示．カードと未グループ化要素は隠す．
+  // パレットの "配置待ち" 種別 (null = 通常モード)．
+  const [pendingKind, setPendingKind] = useState<FinalDiagramShapeKind | null>(null);
+  // 図形ノードの選択 (ReactFlow ネイティブの selected を補助)．
+  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
+
   const fd = useMemo(() => getFinalDiagram(project?.data ?? null), [project?.data]);
 
-  const nodes: Node<GroupNodeData>[] = useMemo(() => {
+  // ノード = グループ (kjgroup) + 図形 (kjfinalshape)．
+  const nodes: Node<AnyNodeData>[] = useMemo(() => {
     if (!project) return [];
-    return project.data.groups
-      .map((g) => {
-        const pos = resolveFinalGroupPosition(fd, project.data.group_positions, g.id);
-        if (!pos) return null;
-        const label = getGroupLabel(project.data, g.id);
-        const memberships = project.data.group_memberships.filter((m) => m.groupId === g.id);
-        const data: GroupNodeData = {
-          name: g.name,
-          labelText: label?.text ?? g.name,
-          memberCount: memberships.length,
-          width: pos.width ?? 320,
-          height: pos.height ?? 200,
-          selected: g.id === selectedGroupId,
-          level: g.level,
-          collapsed: g.collapsed,
-          effectiveFontSize: g.displayStyle?.fontSize,
-          effectiveFontWeight: g.displayStyle?.fontWeight,
-          effectiveColor: g.displayStyle?.color,
-          effectiveBackground: g.displayStyle?.background,
-          effectiveBorderColor: g.displayStyle?.borderColor,
-          effectiveBorderWidth: g.displayStyle?.borderWidth,
-          effectiveBorderStyle: g.displayStyle?.borderStyle,
-        };
-        const node: Node<GroupNodeData> = {
-          id: g.id,
-          type: 'kjgroup',
-          position: { x: pos.x, y: pos.y },
-          data,
-          selected: g.id === selectedGroupId,
-          style: { width: pos.width ?? 320, height: pos.height ?? 200 },
-        };
-        return node;
-      })
-      .filter((n): n is Node<GroupNodeData> => n !== null);
-  }, [project, fd, selectedGroupId]);
+    const groupNodes: Node<AnyNodeData>[] = [];
+    for (const g of project.data.groups) {
+      const pos = resolveFinalGroupPosition(fd, project.data.group_positions, g.id);
+      if (!pos) continue;
+      const label = getGroupLabel(project.data, g.id);
+      const memberships = project.data.group_memberships.filter((m) => m.groupId === g.id);
+      const data: GroupNodeData = {
+        name: g.name,
+        labelText: label?.text ?? g.name,
+        memberCount: memberships.length,
+        width: pos.width ?? 320,
+        height: pos.height ?? 200,
+        selected: g.id === selectedGroupId,
+        level: g.level,
+        collapsed: g.collapsed,
+        effectiveFontSize: g.displayStyle?.fontSize,
+        effectiveFontWeight: g.displayStyle?.fontWeight,
+        effectiveColor: g.displayStyle?.color,
+        effectiveBackground: g.displayStyle?.background,
+        effectiveBorderColor: g.displayStyle?.borderColor,
+        effectiveBorderWidth: g.displayStyle?.borderWidth,
+        effectiveBorderStyle: g.displayStyle?.borderStyle,
+      };
+      groupNodes.push({
+        id: g.id,
+        type: 'kjgroup',
+        position: { x: pos.x, y: pos.y },
+        data,
+        selected: g.id === selectedGroupId,
+        style: { width: pos.width ?? 320, height: pos.height ?? 200 },
+      });
+    }
+    const shapeNodes: Node<AnyNodeData>[] = fd.shapes.map((s) => ({
+      id: s.id,
+      type: 'kjfinalshape',
+      position: { x: s.x, y: s.y },
+      data: { shape: s } as KJFinalShapeNodeData,
+      selected: s.id === selectedShapeId,
+      style: { width: s.width, height: s.height, zIndex: s.z ?? 0 },
+    }));
+    return [...groupNodes, ...shapeNodes];
+  }, [project, fd, selectedGroupId, selectedShapeId]);
 
   const edges: Edge<RelationEdgeData>[] = useMemo(() => {
     if (!project) return [];
     return project.data.diagram_relations
-      // 最終図解はグループ間のみを描く．カード参照のエッジは表示しない．
       .filter((r) => r.sourceObjectType === 'group' && r.targetObjectType === 'group')
       .map((r) => ({
         id: r.id,
@@ -104,19 +133,17 @@ function KJFinalViewImpl() {
       }));
   }, [project]);
 
-  // ReactFlow の内部 nodes state (ドラッグ中の暫定位置を保持)．
-  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<GroupNodeData>(nodes);
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<AnyNodeData>(nodes);
 
-  // project が変わったら同期．
-  useMemo(() => setRfNodes(nodes), [nodes, setRfNodes]);
+  useEffect(() => {
+    setRfNodes(nodes);
+  }, [nodes, setRfNodes]);
 
-  // ドラッグ開始時の位置を覚える (undo の prev 用)．
   const dragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const onNodeDragStart: NodeMouseHandler = useCallback((_e, node) => {
     dragStartRef.current.set(node.id, { x: node.position.x, y: node.position.y });
   }, []);
 
-  // ドラッグ終了時に commit．
   const onNodeDragStop: NodeMouseHandler = useCallback(
     (_e, node) => {
       const prevPos = dragStartRef.current.get(node.id);
@@ -124,41 +151,94 @@ function KJFinalViewImpl() {
       if (!prevPos) return;
       const { x: nx, y: ny } = node.position;
       if (prevPos.x === nx && prevPos.y === ny) return;
-      const w = (node.style?.width as number | undefined) ?? undefined;
-      const h = (node.style?.height as number | undefined) ?? undefined;
-      const prev: { x: number; y: number; width?: number; height?: number } = {
-        x: prevPos.x,
-        y: prevPos.y,
-        width: w,
-        height: h,
-      };
-      const next = { x: nx, y: ny, width: w, height: h };
-      applyCommand(makeSetFinalGroupLayoutCommand(node.id, prev, next));
+      if (node.type === 'kjgroup') {
+        const w = (node.style?.width as number | undefined) ?? undefined;
+        const h = (node.style?.height as number | undefined) ?? undefined;
+        applyCommand(
+          makeSetFinalGroupLayoutCommand(
+            node.id,
+            { x: prevPos.x, y: prevPos.y, width: w, height: h },
+            { x: nx, y: ny, width: w, height: h }
+          )
+        );
+      } else if (node.type === 'kjfinalshape') {
+        const now = new Date().toISOString();
+        applyCommand(
+          makeUpdateFinalShapeCommand(
+            node.id,
+            { x: prevPos.x, y: prevPos.y },
+            { x: nx, y: ny },
+            now
+          )
+        );
+      }
     },
     [applyCommand]
   );
 
-  // クリック → グループ選択 (Phase 3 で右ペインの drill-down 用フック)．
   const onNodeClick: NodeMouseHandler = useCallback(
     (_e, node) => {
-      selectGroup(node.id);
+      if (node.type === 'kjgroup') {
+        selectGroup(node.id);
+        setSelectedShapeId(null);
+      } else if (node.type === 'kjfinalshape') {
+        setSelectedShapeId(node.id);
+        selectGroup(null);
+      }
     },
     [selectGroup]
   );
 
-  const onPaneClick = useCallback(() => {
-    selectGroup(null);
-  }, [selectGroup]);
+  // キャンバスクリック: 配置待ちなら shape 配置．通常時は選択解除．
+  const onPaneClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (pendingKind) {
+        const fp = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        const now = new Date().toISOString();
+        const shape = createFinalShape(pendingKind, fp.x, fp.y, now);
+        applyCommand(makeCreateFinalShapeCommand(shape));
+        setPendingKind(null);
+        setSelectedShapeId(shape.id);
+        return;
+      }
+      selectGroup(null);
+      setSelectedShapeId(null);
+    },
+    [pendingKind, screenToFlowPosition, applyCommand, selectGroup]
+  );
 
-  // 内部ノードのドラッグ用に onNodesChange を渡す (位置のみ反映、他は無視)．
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      // 位置変更のみ即時反映．その他 (selection 等) は store 経由でやる．
       const positionOnly = changes.filter((c) => c.type === 'position' || c.type === 'dimensions');
       if (positionOnly.length > 0) onNodesChange(positionOnly);
     },
     [onNodesChange]
   );
+
+  // Delete キーで選択中の図形を削除 / Esc で配置待ちキャンセル．
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (e.key === 'Escape' && pendingKind) {
+        e.preventDefault();
+        setPendingKind(null);
+        return;
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShapeId) {
+        const shape = (project?.data.final_diagram?.shapes ?? []).find(
+          (s: FinalDiagramShape) => s.id === selectedShapeId
+        );
+        if (shape) {
+          e.preventDefault();
+          applyCommand(makeDeleteFinalShapeCommand(shape));
+          setSelectedShapeId(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pendingKind, selectedShapeId, project, applyCommand]);
 
   if (!project) {
     return (
@@ -185,7 +265,8 @@ function KJFinalViewImpl() {
   }
 
   return (
-    <div className="kj-final-view" style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+    <div className={`kj-final-view ${pendingKind ? 'pending-place' : ''}`} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+      <KJFinalShapePalette pendingKind={pendingKind} onPick={setPendingKind} />
       <div className="canvas-flow" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <ReactFlow
           nodes={rfNodes}

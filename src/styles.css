@@ -3117,3 +3117,167 @@ mark.search-match {
   border-radius: 4px;
   margin-bottom: 8px;
 }
+
+/* 図形パレット (左) */
+.kj-final-palette {
+  flex: 0 0 140px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-elev);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.kj-final-palette-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.kj-final-palette-cancel {
+  background: var(--danger);
+  color: white;
+  border: none;
+  font-size: 14px;
+  width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.kj-final-palette-group {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.kj-final-palette-sub {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.kj-final-palette-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.kj-final-palette-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 6px 4px;
+  cursor: pointer;
+  color: var(--text);
+  transition: background 0.1s;
+}
+
+.kj-final-palette-btn:hover { background: var(--bg-elev-2); }
+.kj-final-palette-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.kj-final-palette-glyph { font-size: 16px; line-height: 1; }
+.kj-final-palette-label { font-size: 10px; color: var(--text-muted); }
+.kj-final-palette-btn.active .kj-final-palette-label { color: white; }
+
+.kj-final-palette-hint { padding: 8px 12px; line-height: 1.5; }
+
+.kj-final-view.pending-place .react-flow__pane {
+  cursor: crosshair !important;
+}
+
+/* 図形ノード (キャンバス上) */
+.kj-final-shape {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.kj-final-shape.selected {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+
+.kj-final-shape-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.kj-final-shape-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  text-align: center;
+  z-index: 1;
+}
+
+.kj-final-shape-glyph {
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.kj-final-shape-label {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.kj-final-shape-textonly {
+  font-size: 14px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.kj-final-shape-edit {
+  width: 90%;
+  height: 80%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: none;
+}
+
+.kj-final-shape-kindbadge {
+  position: absolute;
+  bottom: -16px;
+  left: 0;
+  font-size: 9px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.kj-final-shape.selected .kj-final-shape-kindbadge { opacity: 1; }

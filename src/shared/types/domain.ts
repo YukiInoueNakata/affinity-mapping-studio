@@ -96,6 +96,8 @@ export interface Group {
   collapsed: boolean;
   /** Inline display overrides (font, color, etc.). */
   displayStyle?: DisplayStyle;
+  /** Per-group narrative for the B 型叙述化 step of KJ method (田中 2011 / 川喜田 1986). */
+  narrative?: string;
   createdAt: ISODateString;
   updatedAt: ISODateString;
 }
@@ -459,4 +461,70 @@ export interface ProjectMetadata {
   updated_at: ISODateString;
   description: string;
   displaySettings?: DisplaySettings;
+  /** KJ 法 1986/1997 版の最終図解化 (A 型) 用の専用情報。schema v9 で追加。
+   *  存在しない場合は空 (`createEmptyFinalDiagram()`) として扱う。 */
+  finalDiagram?: FinalDiagram;
+}
+
+// ---- Final KJ diagram (schema v9) ----
+// 川喜田 1986/1997 版の A 型図解化 (元ラベル添付→島どり→島間関連付け→シンボル→
+// 表題・註記) を，KJ canvas と独立した最終図解ビューで扱うためのデータ。
+// 配置は KJ canvas の group_positions と独立 (この最終図解だけ自由に動かせる)。
+
+/** 図形パレットから配置する標準シンボルの種類。
+ *  - DiagramRelationType 14 種 (因果/対立/包含/同質 等．川喜田 1997 図 1 を参照)
+ *  - 装飾形状 (円 / 矩形 / 雲 / 角括弧 / 単独矢印 / テキスト) */
+export type FinalDiagramShapeKind =
+  | DiagramRelationType
+  | 'circle'
+  | 'rect'
+  | 'cloud'
+  | 'bracket'
+  | 'arrow_standalone'
+  | 'text';
+
+export interface FinalDiagramShape {
+  id: string;
+  kind: FinalDiagramShapeKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** 回転角度 (度). 0 = 通常向き. */
+  rotation: number;
+  /** 図形の上に重ねるラベル. */
+  label?: string;
+  /** 既定は kind 由来 (関係種別なら RELATION_TYPE_COLORS[kind]). */
+  color?: string;
+  /** 任意で「特定グループに紐づく注釈」として扱える. null = 独立. */
+  anchorGroupId?: string | null;
+  /** 描画順 (z-index 相当). 大きいほど手前. */
+  z?: number;
+  createdAt: ISODateString;
+  updatedAt: ISODateString;
+}
+
+export interface FinalDiagramAnnotation {
+  /** 作成日 (YYYY-MM-DD 等の文字列でよい). */
+  date?: string;
+  /** 作成場所. */
+  place?: string;
+  /** データ出所. */
+  source?: string;
+  /** 作成者 (複数なら "山田, 鈴木" 等). */
+  authors?: string;
+}
+
+export interface FinalDiagram {
+  /** 図解全体の表題. */
+  title?: string;
+  /** 図解の右下に添える註記 (作成日/場所/出所/作成者). */
+  annotation?: FinalDiagramAnnotation;
+  /** 最終図解専用の Group 配置 (KJ canvas とは独立).
+   *  キー: Group.id. 空オブジェクトの時は KJ canvas の group_positions から初期化される. */
+  groupLayout: Record<string, { x: number; y: number; width?: number; height?: number }>;
+  /** 図形パレットから配置したシンボル. */
+  shapes: FinalDiagramShape[];
+  /** 全体の叙述メモ (Group 個別の narrative とは別に，図解全体の総括). */
+  overallNarrative?: string;
 }

@@ -33,6 +33,7 @@ import {
 } from './KJFinalShapeNode.js';
 import { KJFinalShapePalette } from './KJFinalShapePalette.js';
 import { RelationEdge, type RelationEdgeData, FINAL_VIEW_RELATION_STROKE } from './RelationEdge.js';
+import { RelationMarkerDefs } from './RelationMarkerDefs.js';
 import {
   makeCreateFinalShapeCommand,
   makeDeleteFinalShapeCommand,
@@ -308,6 +309,8 @@ function KJFinalViewImpl() {
       <KJFinalShapePalette pendingKind={pendingKind} onPick={setPendingKind} />
       <div className="canvas-flow" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <FourNotBanner />
+        {/* 関係種別ごとの SVG marker 定義（最終図解ビュー専用．両端矢印 + 14 種フル形状） */}
+        <RelationMarkerDefs />
         <ReactFlow
           nodes={rfNodes}
           edges={edges}

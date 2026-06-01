@@ -20,8 +20,8 @@ import { ExportDialog } from './components/ExportDialog.js';
 import { WordExportWizard } from './components/WordExportWizard.js';
 import { HierarchyPane } from './components/HierarchyPane.js';
 import { CardPlacementPane } from './components/CardPlacementPane.js';
-import { MGtaWorkspace } from './components/MGtaWorkspace.js';
-import { GtaWorkspace } from './components/GtaWorkspace.js';
+// M-GTA / GTA ワークスペースは当面 UI 非表示．import を残すと未使用警告になるため削除．
+// 将来再有効化時は再度 import + AppMode 分岐 + ribbon ボタンを復活させる．
 import { useResizableWidth } from './hooks/useResizableWidth.js';
 import { projectService } from './services/projectService.js';
 import type { SearchHit } from './domain/search.js';
@@ -1041,33 +1041,8 @@ export function App() {
             </button>
           )}
           {__INCLUDE_SYNC__ && <SyncStatusBadge onOpenConnect={() => setSyncDialogOpen(true)} />}
-          <span className="ribbon-spacer" />
-          <div className="mode-switcher" title="分析モード切替">
-            <span className="ribbon-mode-label muted small">モード</span>
-            <button
-              type="button"
-              className={`mode-btn ${mode === 'kj' ? 'active' : ''}`}
-              onClick={() => setMode('kj')}
-            >
-              KJ
-            </button>
-            <button
-              type="button"
-              className={`mode-btn ${mode === 'm_gta' ? 'active' : ''}`}
-              onClick={() => setMode('m_gta')}
-              disabled={!project}
-            >
-              M-GTA
-            </button>
-            <button
-              type="button"
-              className={`mode-btn ${mode === 'gta' ? 'active' : ''}`}
-              onClick={() => setMode('gta')}
-              disabled={!project}
-            >
-              GTA
-            </button>
-          </div>
+          {/* 分析モード切替 (KJ / M-GTA / GTA) は当面 KJ のみのため UI 上は非表示．
+              データ構造・型 (AppMode) は温存しており，将来再有効化可能． */}
         </div>
         <div className="ribbon-row-2">
           {ribbonTab === 'file' && (
@@ -1590,11 +1565,9 @@ export function App() {
 
       <main className="app-main">
         {project ? (
-          mode === 'm_gta' ? (
-            <MGtaWorkspace />
-          ) : mode === 'gta' ? (
-            <GtaWorkspace />
-          ) : (
+          // M-GTA / GTA ワークスペースは UI 上は非表示．常に KJ レイアウト．
+          // (将来再有効化する場合は mode === 'm_gta'/'gta' の分岐を復活させる)
+          (
             <>
               {leftCollapsed ? (
                 <button

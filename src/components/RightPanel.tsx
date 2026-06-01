@@ -548,9 +548,11 @@ function CardRightPanel() {
           <button type="button" onClick={() => setSplitOpen(true)}>
             分割...
           </button>
+          {/* GTA コード付与は当面 UI 非表示．handleApplyCode は温存．
           <button type="button" onClick={handleApplyCode}>
             + GTA コード付与
           </button>
+          */}
           {groupName && (
             <button
               type="button"
@@ -566,7 +568,9 @@ function CardRightPanel() {
         </div>
       </section>
 
+      {/* GTA コード付与済み一覧は当面 UI 非表示．
       <CardCodesSection card={card} />
+      */}
 
 
       <CardSplitDialog
@@ -876,9 +880,11 @@ function GroupRightPanel() {
           </ul>
         )}
         <div className="right-actions" style={{ gap: 6, flexWrap: 'wrap' }}>
+          {/* M-GTA 概念候補ボタンは当面 UI 非表示．handleConvertToMGtaConcept は温存．
           <button type="button" onClick={handleConvertToMGtaConcept}>
             M-GTA 概念候補にする
           </button>
+          */}
           <button type="button" onClick={handleDelete} className="danger">
             グループを削除
           </button>

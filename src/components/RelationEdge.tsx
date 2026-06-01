@@ -7,6 +7,7 @@ import {
 } from 'reactflow';
 import type { DiagramRelationType } from '@shared/types/domain';
 import {
+  BIDIRECTIONAL_RELATIONS,
   RELATION_TYPE_COLORS,
   RELATION_TYPE_GLYPHS,
   RELATION_TYPE_LABELS,
@@ -52,12 +53,20 @@ function RelationEdgeImpl({
   const typeLabel = RELATION_TYPE_LABELS[relationType];
   const customLabel = data?.label && data.label.trim().length > 0 ? data.label : undefined;
 
+  // Final view (monochrome) では 14 種別ごとの SVG marker を kj-arrow-final-* で参照．
+  // 通常 Canvas (monochrome=false) は従来通り kj-arrow-* (markers 未定義のためデフォルト線)．
+  const markerIdPrefix = monochrome ? 'kj-arrow-final-' : 'kj-arrow-';
+  const markerEndUrl = `url(#${markerIdPrefix}${relationType})`;
+  const isBidirectional = monochrome && BIDIRECTIONAL_RELATIONS.has(relationType);
+  const markerStartUrl = isBidirectional ? markerEndUrl : undefined;
+
   return (
     <>
       <BaseEdge
         id={id}
         path={edgePath}
-        markerEnd={`url(#kj-arrow-${relationType})`}
+        markerStart={markerStartUrl}
+        markerEnd={markerEndUrl}
         style={{
           stroke: selected ? '#fff' : baseColor,
           strokeWidth: selected ? 3 : 2,

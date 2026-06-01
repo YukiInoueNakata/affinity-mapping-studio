@@ -59,6 +59,13 @@ export const RELATION_TYPE_ORDER: DiagramRelationType[] = [
   'custom',
 ];
 
+/** 両端に矢じりを持つ（対称・双方向の）関係種別．
+ *  KJFinalView では markerStart + markerEnd の両方に同じ marker を適用する． */
+export const BIDIRECTIONAL_RELATIONS: ReadonlySet<DiagramRelationType> = new Set<DiagramRelationType>([
+  'contrasts_with',
+  'co_occurs_with',
+]);
+
 export const RELATION_TYPE_COLORS: Record<DiagramRelationType, string> = {
   causes: '#e06c75',
   promotes: '#6fc88a',

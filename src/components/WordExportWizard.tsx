@@ -526,7 +526,7 @@ function AuxiliaryStep({
     'テキストマイニング',
     '数量化III類',
     '群比較 (t 検定 / χ² 検定)',
-    'M-GTA との混合',
+    // M-GTA は当面 UI 上は非表示．プリセットから除外．
   ];
   const toggle = (s: string) => {
     const has = wiz.auxiliaryAnalyses.includes(s);

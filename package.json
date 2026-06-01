@@ -1,8 +1,8 @@
 {
   "name": "kj-studio",
   "private": true,
-  "version": "0.1.0",
-  "description": "KJ Trace Studio (personal use, individual edition).",
+  "version": "0.2.1",
+  "description": "KJ Trace Studio (Tauri 統合版).",
   "type": "module",
   "scripts": {
     "dev": "vite",

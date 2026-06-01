@@ -1792,7 +1792,7 @@ dependencies = [
 
 [[package]]
 name = "kj-trace-tauri"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "calamine",
  "csv",
@@ -1804,6 +1804,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tokio",
  "zip 2.4.2",
 ]
 

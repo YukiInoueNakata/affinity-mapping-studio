@@ -32,7 +32,7 @@ import {
   type KJFinalShapeNodeData,
 } from './KJFinalShapeNode.js';
 import { KJFinalShapePalette } from './KJFinalShapePalette.js';
-import { RelationEdge, type RelationEdgeData } from './RelationEdge.js';
+import { RelationEdge, type RelationEdgeData, FINAL_VIEW_RELATION_STROKE } from './RelationEdge.js';
 import {
   makeCreateFinalShapeCommand,
   makeDeleteFinalShapeCommand,
@@ -45,7 +45,6 @@ import {
   resolveFinalGroupPosition,
 } from '../domain/finalDiagram.js';
 import { getGroupLabel } from '../domain/groups.js';
-import { RELATION_TYPE_COLORS } from '../domain/relations.js';
 import type {
   FinalDiagramShape,
   FinalDiagramShapeKind,
@@ -164,10 +163,11 @@ function KJFinalViewImpl() {
         source: r.sourceObjectId,
         target: r.targetObjectId,
         type: 'relation',
-        data: { relationType: r.relationType, label: r.label },
+        // 最終図解はモノクロ + 記号 (グリフ) で識別 (論文体裁準拠)．
+        data: { relationType: r.relationType, label: r.label, monochrome: true },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: RELATION_TYPE_COLORS[r.relationType],
+          color: FINAL_VIEW_RELATION_STROKE,
         },
       }));
   }, [project]);

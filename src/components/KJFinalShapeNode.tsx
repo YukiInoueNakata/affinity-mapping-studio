@@ -12,10 +12,10 @@ import {
 } from '../stores/commands.js';
 import type { FinalDiagramShape, FinalDiagramShapeKind } from '@shared/types/domain';
 import {
-  RELATION_TYPE_COLORS,
   RELATION_TYPE_GLYPHS,
   RELATION_TYPE_LABELS,
 } from '../domain/relations.js';
+import { FINAL_VIEW_RELATION_STROKE } from './RelationEdge.js';
 
 export interface KJFinalShapeNodeData {
   shape: FinalDiagramShape;
@@ -34,10 +34,11 @@ function isPrimitive(kind: FinalDiagramShapeKind): boolean {
   return PRIMITIVE_KINDS.has(kind);
 }
 
-function defaultColor(kind: FinalDiagramShapeKind): string {
-  if (isPrimitive(kind)) return '#888888';
-  // relation type
-  return (RELATION_TYPE_COLORS as Record<string, string>)[kind] ?? '#888888';
+/** 最終図解は論文体裁準拠でモノクロ既定．種別の差はグリフ (記号) で示す．
+ *  ユーザーが個別に色を設定したい場合は NodeToolbar の color picker で上書きできる．
+ *  リテラル hex を返すのは <input type="color"> が CSS 変数を解釈できないため． */
+function defaultColor(_kind: FinalDiagramShapeKind): string {
+  return FINAL_VIEW_RELATION_STROKE;
 }
 
 function defaultGlyph(kind: FinalDiagramShapeKind): string {

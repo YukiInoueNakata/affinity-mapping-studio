@@ -6,7 +6,6 @@
 import { Fragment } from 'react';
 import type { FinalDiagramShapeKind } from '@shared/types/domain';
 import {
-  RELATION_TYPE_COLORS,
   RELATION_TYPE_GLYPHS,
   RELATION_TYPE_LABELS,
   RELATION_TYPE_ORDER,
@@ -48,8 +47,8 @@ export function KJFinalShapePalette({ pendingKind, onPick }: KJFinalShapePalette
           {RELATION_TYPE_ORDER.map((kind) => {
             const glyph = (RELATION_TYPE_GLYPHS as Record<string, string>)[kind] ?? '?';
             const label = (RELATION_TYPE_LABELS as Record<string, string>)[kind] ?? kind;
-            const color = (RELATION_TYPE_COLORS as Record<string, string>)[kind] ?? '#888';
             const active = pendingKind === (kind as FinalDiagramShapeKind);
+            // 最終図解は論文準拠でモノクロ．種別の差はグリフ (記号) で示す．
             return (
               <button
                 key={kind}
@@ -58,9 +57,7 @@ export function KJFinalShapePalette({ pendingKind, onPick }: KJFinalShapePalette
                 onClick={() => onPick(active ? null : (kind as FinalDiagramShapeKind))}
                 title={`${label} を配置 (クリック → キャンバスをクリックで配置)`}
               >
-                <span className="kj-final-palette-glyph" style={{ color }}>
-                  {glyph}
-                </span>
+                <span className="kj-final-palette-glyph">{glyph}</span>
                 <span className="kj-final-palette-label">{label}</span>
               </button>
             );

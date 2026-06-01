@@ -2583,6 +2583,28 @@ mark.search-match {
   font-weight: 600;
 }
 
+/* 最終図解モード: モノクロ + 大きめのグリフ (記号) で種別を識別 */
+.kj-relation-edge-label.mono {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-weight: 700;
+}
+
+.kj-relation-edge-glyph {
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.kj-relation-edge-sublabel {
+  font-size: 10px;
+  opacity: 0.85;
+  font-weight: 500;
+}
+
 /* label tabs */
 
 .label-tabs-row {

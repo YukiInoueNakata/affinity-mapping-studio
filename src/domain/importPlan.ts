@@ -151,6 +151,73 @@ export function splitBySentenceDelimiters(text: string, delimiters: string): str
   return out;
 }
 
+/** 発言者プレフィクスのマッチング用オプション．
+ *  ユーザーがインタビュー文字起こしを「列」として持たない場合，行頭の `Q:` `A:`
+ *  `司会:` 等を抜き出して話者列に変換する用途．
+ *
+ *  punctuations: プレフィクスの直後に許容する区切り文字（複数選択）．
+ *    例: [':', '：'] なら半角・全角コロンの両方を受け入れる．
+ *    空集合 + allowSpace=false の場合，プレフィクス直後がそのまま本文．
+ *  allowSpace: 区切り文字の前後に空白を許容する．
+ *  continueOnUnmatched: マッチしない行を直前話者の続きとして扱う（true）か，
+ *    話者空欄で本文だけ扱う（false）か．
+ */
+export interface SpeakerPrefixOptions {
+  prefixes: string[];
+  punctuations: string[];
+  allowSpace: boolean;
+  continueOnUnmatched: boolean;
+}
+
+/** 各行の先頭から話者プレフィクスを抽出し，[speaker, body] の 2 列に変換する．
+ *  プレフィクスが一致しない行は，continueOnUnmatched に応じて
+ *  - true: 直前話者を引き継いで [prev, line]
+ *  - false: [' ', line]（話者空欄）
+ *  を返す．
+ *
+ *  入力 rows は通常 1 列（[[line1], [line2], ...]）を想定．既に多列のものは
+ *  そのまま素通しする（tabular 経路では使わない）． */
+export function applySpeakerPrefixes(
+  rows: string[][],
+  opts: SpeakerPrefixOptions
+): string[][] {
+  const valid = opts.prefixes.map((p) => p.trim()).filter((p) => p.length > 0);
+  if (valid.length === 0) return rows;
+  // 長いプレフィクスを先に試す（短いものに食われないよう）
+  const sorted = [...valid].sort((a, b) => b.length - a.length);
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const puncts = opts.punctuations.filter((c) => c.length > 0);
+  const punctClass =
+    puncts.length > 0 ? `[${puncts.map(escapeRe).join('')}]` : '';
+  const optionalSp = opts.allowSpace ? '\\s*' : '';
+  const headRegex = new RegExp(
+    `^${optionalSp}(${sorted.map(escapeRe).join('|')})${optionalSp}${
+      punctClass.length > 0 ? `(?:${punctClass})${optionalSp}` : (opts.allowSpace ? '\\s+' : '')
+    }`
+  );
+  let lastSpeaker = '';
+  const out: string[][] = [];
+  for (const row of rows) {
+    if (row.length !== 1) {
+      out.push(row);
+      continue;
+    }
+    const line = row[0] ?? '';
+    const m = headRegex.exec(line);
+    if (m) {
+      const speaker = m[1];
+      const rest = line.slice(m[0].length);
+      out.push([speaker, rest]);
+      lastSpeaker = speaker;
+    } else if (opts.continueOnUnmatched && lastSpeaker.length > 0) {
+      out.push([lastSpeaker, line]);
+    } else {
+      out.push(['', line]);
+    }
+  }
+  return out;
+}
+
 /** Heuristically guess whether a tabular file looks like a survey (rows are
  *  distinct participants, identified by an ID-like column) or an interview
  *  (1 file = 1 participant, optional speaker column).

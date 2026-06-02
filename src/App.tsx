@@ -1141,6 +1141,18 @@ export function App() {
                   <span>保存</span>
                 </button>
               </RibbonSection>
+              <RibbonSection label="取り込み">
+                <button
+                  type="button"
+                  className="rb-btn-lg"
+                  onClick={() => setImportOpen(true)}
+                  disabled={!project}
+                  title="テキスト・CSV・Excel・Word から原文を取り込む"
+                >
+                  <span className="rb-glyph">↓</span>
+                  <span>テキスト取り込み</span>
+                </button>
+              </RibbonSection>
               <RibbonSection label="連携">
                 <button
                   type="button"

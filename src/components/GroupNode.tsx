@@ -1,4 +1,4 @@
-import { memo, useRef } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import {
   Handle,
   NodeResizer,
@@ -10,6 +10,8 @@ import {
 } from 'reactflow';
 import { useProjectStore } from '../stores/projectStore.js';
 import {
+  makeEditLabelCommand,
+  makeRenameGroupCommand,
   makeResizeGroupCommand,
   makeToggleGroupCollapsedCommand,
 } from '../stores/commands.js';
@@ -47,6 +49,60 @@ function GroupNodeImpl({ id, data, selected }: NodeProps<GroupNodeData>) {
   const selectGroupIds = useProjectStore((s) => s.selectGroupIds);
   const selectedGroupIds = useProjectStore((s) => s.selectedGroupIds);
   const startRect = useRef<ResizeRect | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const editInputRef = useRef<HTMLInputElement | null>(null);
+
+  // 編集モードに入った瞬間に input にフォーカスし全選択
+  useEffect(() => {
+    if (editing && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editing]);
+
+  /** 表札テキストを編集中の値で確定．Label レコードがあればその text を更新．
+   *  無ければ Group.name を更新．既存と同一なら何もしない． */
+  const commitEdit = () => {
+    if (!project) {
+      setEditing(false);
+      return;
+    }
+    const next = draft.trim();
+    const group = project.data.groups.find((g) => g.id === id);
+    if (!group) {
+      setEditing(false);
+      return;
+    }
+    const label = project.data.labels.find((l) => l.groupId === id);
+    const currentText = (label?.text ?? '').trim() || group.name;
+    if (next === currentText) {
+      setEditing(false);
+      return;
+    }
+    const now = new Date().toISOString();
+    if (label) {
+      applyCommand(
+        makeEditLabelCommand(label.id, 'text', label.text, next, now, label.updatedAt)
+      );
+    } else {
+      applyCommand(makeRenameGroupCommand(id, group.name, next, now, group.updatedAt));
+    }
+    setEditing(false);
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+  };
+
+  const startEdit = () => {
+    if (!project) return;
+    const group = project.data.groups.find((g) => g.id === id);
+    if (!group) return;
+    const label = project.data.labels.find((l) => l.groupId === id);
+    setDraft((label?.text ?? '').trim() || group.name);
+    setEditing(true);
+  };
 
   const handleHeaderClick = (e: React.MouseEvent) => {
     // The header sits above the node bounds, so React Flow does not
@@ -194,7 +250,13 @@ function GroupNodeImpl({ id, data, selected }: NodeProps<GroupNodeData>) {
         <div
           className="kj-group-node-header"
           onClick={handleHeaderClick}
-          title="クリックでグループを選択"
+          onContextMenu={(e) => {
+            // 右クリックで表札編集モードへ（デフォルトコンテキストメニュー抑止）
+            e.preventDefault();
+            e.stopPropagation();
+            startEdit();
+          }}
+          title="クリック: 選択 / ダブルクリック・右クリック: 表札を編集"
         >
           <button
             type="button"
@@ -204,16 +266,52 @@ function GroupNodeImpl({ id, data, selected }: NodeProps<GroupNodeData>) {
           >
             {isCollapsed ? '▶' : '▼'}
           </button>
-          <span
-            className="kj-group-node-title"
-            style={{
-              fontSize: data.effectiveFontSize,
-              fontWeight: data.effectiveFontWeight,
-              color: data.effectiveColor,
-            }}
-          >
-            {headerText}
-          </span>
+          {editing ? (
+            <input
+              ref={editInputRef}
+              type="text"
+              className="kj-group-node-title-input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onBlur={commitEdit}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitEdit();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  cancelEdit();
+                }
+              }}
+              style={{
+                fontSize: data.effectiveFontSize,
+                fontWeight: data.effectiveFontWeight,
+                color: data.effectiveColor,
+                flex: 1,
+                minWidth: 80,
+              }}
+            />
+          ) : (
+            <span
+              className="kj-group-node-title"
+              style={{
+                fontSize: data.effectiveFontSize,
+                fontWeight: data.effectiveFontWeight,
+                color: data.effectiveColor,
+                cursor: 'text',
+              }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                startEdit();
+              }}
+              title="ダブルクリックで表札を編集"
+            >
+              {headerText}
+            </span>
+          )}
           {!isParent && <span className="kj-group-node-count">{data.memberCount} 枚</span>}
           {isCollapsed && (
             <span className="kj-group-node-count" style={{ color: '#e0b34c' }}>

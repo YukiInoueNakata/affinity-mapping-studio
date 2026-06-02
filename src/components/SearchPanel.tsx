@@ -6,6 +6,18 @@ interface Props {
   onJumpTo(hit: SearchHit): void;
 }
 
+/** 右クリック時のジャンプ＋カード選択．カード行のみ意味があるが，他種別でも
+ *  ジャンプ動作は同等にする（左クリックと挙動を揃える）． */
+function dispatchJumpToCard(cardId: string) {
+  try {
+    window.dispatchEvent(
+      new CustomEvent('kj.jumpToCard', { detail: { cardId } })
+    );
+  } catch {
+    // ignore (jsdom 環境などで CustomEvent が無いケース)
+  }
+}
+
 const KIND_LABEL: Record<SearchHitKind, string> = {
   card: 'カード',
   segment: '原文',
@@ -16,6 +28,7 @@ const KIND_LABEL: Record<SearchHitKind, string> = {
 export function SearchPanel({ onJumpTo }: Props) {
   const project = useProjectStore((s) => s.project);
   const selectedParticipantId = useProjectStore((s) => s.selectedParticipantId);
+  const selectCard = useProjectStore((s) => s.selectCard);
   const [query, setQuery] = useState<string>('');
   const [scopeFilter, setScopeFilter] = useState<'all' | SearchHitKind>('all');
 
@@ -77,7 +90,21 @@ export function SearchPanel({ onJumpTo }: Props) {
             ) : (
               <ul className="search-results-list">
                 {hits.map((h) => (
-                  <li key={h.id} onClick={() => onJumpTo(h)}>
+                  <li
+                    key={h.id}
+                    onClick={() => onJumpTo(h)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      if (h.kind === 'card') {
+                        selectCard(h.refId);
+                        dispatchJumpToCard(h.refId);
+                      } else {
+                        // 非カード行は通常ジャンプと同等
+                        onJumpTo(h);
+                      }
+                    }}
+                    title="左クリック: 移動 / 右クリック: 選択して移動"
+                  >
                     <div className="search-result-head">
                       <span className={`kind-tag kind-${h.kind}`}>{KIND_LABEL[h.kind]}</span>
                       <span className="search-result-title">{h.title}</span>

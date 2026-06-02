@@ -711,11 +711,26 @@ export function SourceViewer() {
       const hasCards = data.cards.some((c) => c.participantId === p.id);
       return !hasCards;
     });
+    // カスケード削除: このファイルのセグメントを 1 つでも参照しているカードは
+    // 連鎖削除（リンク・配置・グループ所属も併せて消す．Undo で復元される）．
+    const cascadedCardIds = new Set(
+      data.card_source_links
+        .filter((l) => targetIds.has(l.segmentId))
+        .map((l) => l.cardId)
+    );
+    const cascadedCards = data.cards.filter((c) => cascadedCardIds.has(c.id));
+    const cascadedLinks = data.card_source_links.filter((l) => cascadedCardIds.has(l.cardId));
+    const cascadedPositions = data.card_positions.filter((p) => cascadedCardIds.has(p.cardId));
+    const cascadedMemberships = data.group_memberships.filter((m) => cascadedCardIds.has(m.cardId));
     const partNote =
       orphaned.length > 0 ? `\nカードの無い参加者 ${orphaned.length} 名も削除されます．` : '';
+    const cardNote =
+      cascadedCards.length > 0
+        ? `\nこのファイル由来のセグメントを参照するカード ${cascadedCards.length} 枚も削除されます．`
+        : '';
     if (
       !confirm(
-        `ファイル「${fileName}」の ${targets.length} 件のセグメントをすべて削除しますか？${partNote}\n(Undo で復元できます)`
+        `ファイル「${fileName}」の ${targets.length} 件のセグメントをすべて削除しますか？${cardNote}${partNote}\n(Undo で復元できます)`
       )
     )
       return;
@@ -726,7 +741,11 @@ export function SourceViewer() {
         targets.map((s) => s.id),
         new Date().toISOString(),
         prev,
-        orphaned
+        orphaned,
+        cascadedCards,
+        cascadedLinks,
+        cascadedPositions,
+        cascadedMemberships
       )
     );
   }

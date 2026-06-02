@@ -60,23 +60,35 @@ function PlacementSection({
   const selectedCardId = useProjectStore((s) => s.selectedCardId);
   const [collapsed, setCollapsed] = useState(false);
   const [shuffleOrder, setShuffleOrder] = useState<string[] | null>(null);
+  const [filter, setFilter] = useState<string>('');
   const kbScroll = useKeyboardScroll();
+
+  // フィルタ後カード．カードコード（ID）と本文の双方を部分一致．
+  const filteredCards = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (q.length === 0) return cards;
+    return cards.filter(
+      (c) =>
+        c.code.toLowerCase().includes(q) ||
+        (c.body ?? '').toLowerCase().includes(q)
+    );
+  }, [cards, filter]);
 
   // Apply the local shuffle order if it covers exactly the current card ids.
   // When the underlying card set changes (new add / remove) we drop the order
   // back to natural ordering so the new card appears.
   const orderedCards = useMemo(() => {
-    if (!shuffleOrder) return cards;
-    const set = new Set(cards.map((c) => c.id));
+    if (!shuffleOrder) return filteredCards;
+    const set = new Set(filteredCards.map((c) => c.id));
     const idsMatch =
-      shuffleOrder.length === cards.length &&
+      shuffleOrder.length === filteredCards.length &&
       shuffleOrder.every((id) => set.has(id));
-    if (!idsMatch) return cards;
-    const map = new Map(cards.map((c) => [c.id, c]));
+    if (!idsMatch) return filteredCards;
+    const map = new Map(filteredCards.map((c) => [c.id, c]));
     return shuffleOrder
       .map((id) => map.get(id))
       .filter((c): c is Card => !!c);
-  }, [cards, shuffleOrder]);
+  }, [filteredCards, shuffleOrder]);
 
   const handleShuffle = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -178,11 +190,39 @@ function PlacementSection({
       </header>
       {!collapsed && (
         <div className="placement-list" {...kbScroll}>
+          {cards.length >= 2 && (
+            <div
+              style={{
+                padding: '4px 8px',
+                borderBottom: '1px solid var(--border)',
+                background: 'var(--bg-elev-2)',
+              }}
+            >
+              <input
+                type="text"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="ID または本文で絞り込み（例: 48 / P02-048）"
+                style={{ width: '100%', fontSize: 11 }}
+                onClick={(e) => e.stopPropagation()}
+              />
+              {filter.trim() && (
+                <div className="muted small" style={{ marginTop: 2 }}>
+                  {orderedCards.length} / {cards.length} 件表示
+                </div>
+              )}
+            </div>
+          )}
           {cards.length === 0 && (
             <div className="muted small" style={{ padding: 8 }}>
               {placement === 'unclassified'
                 ? '未分類のカードはありません'
                 : '保留中のカードはありません'}
+            </div>
+          )}
+          {cards.length > 0 && orderedCards.length === 0 && (
+            <div className="muted small" style={{ padding: 8 }}>
+              絞り込みにマッチするカードがありません
             </div>
           )}
           {orderedCards.map((c) => (

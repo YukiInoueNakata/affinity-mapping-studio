@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { ProjectData, SourceSegment } from '@shared/types/domain';
 import type { WordComment } from '@shared/types/ipc';
 import {
+  applySpeakerPrefixes,
   buildCommentsAsCards,
   buildCommentsAsSegments,
   buildImport,
@@ -682,5 +683,103 @@ describe('buildImport — auto cards', () => {
     expect(result.cardLinks).toHaveLength(2);
     expect(result.cardLinks[0].cardId).toBe(result.cards[0].id);
     expect(result.cardPositions).toHaveLength(2);
+  });
+});
+
+describe('applySpeakerPrefixes', () => {
+  const PUNCT_COLONS = [':', '：'];
+  it('strips colon-suffixed prefixes and emits [speaker, body]', () => {
+    const rows = [
+      ['Q: 今日はどうでしたか'],
+      ['A: 楽しかったです'],
+      ['Q：もう少し具体的に'],
+    ];
+    const out = applySpeakerPrefixes(rows, {
+      prefixes: ['Q', 'A'],
+      punctuations: PUNCT_COLONS,
+      allowSpace: true,
+      continueOnUnmatched: false,
+    });
+    expect(out).toEqual([
+      ['Q', '今日はどうでしたか'],
+      ['A', '楽しかったです'],
+      ['Q', 'もう少し具体的に'],
+    ]);
+  });
+
+  it('emits empty speaker when no prefix matches and continueOnUnmatched=false', () => {
+    const rows = [['Q: 質問'], ['ふつうの行']];
+    const out = applySpeakerPrefixes(rows, {
+      prefixes: ['Q', 'A'],
+      punctuations: PUNCT_COLONS,
+      allowSpace: true,
+      continueOnUnmatched: false,
+    });
+    expect(out[1]).toEqual(['', 'ふつうの行']);
+  });
+
+  it('inherits previous speaker on unmatched when continueOnUnmatched=true', () => {
+    const rows = [['Q: 質問'], ['続きの説明'], ['A: 回答']];
+    const out = applySpeakerPrefixes(rows, {
+      prefixes: ['Q', 'A'],
+      punctuations: PUNCT_COLONS,
+      allowSpace: true,
+      continueOnUnmatched: true,
+    });
+    expect(out).toEqual([
+      ['Q', '質問'],
+      ['Q', '続きの説明'],
+      ['A', '回答'],
+    ]);
+  });
+
+  it('prefers longer prefixes when one is a prefix of another', () => {
+    const rows = [['学生1: 一郎が話す'], ['学生10: 十郎が話す']];
+    const out = applySpeakerPrefixes(rows, {
+      prefixes: ['学生1', '学生10'],
+      punctuations: [':'],
+      allowSpace: true,
+      continueOnUnmatched: false,
+    });
+    expect(out).toEqual([
+      ['学生1', '一郎が話す'],
+      ['学生10', '十郎が話す'],
+    ]);
+  });
+
+  it('supports comma punctuation and full-width variant', () => {
+    const rows = [['司会, 開会の挨拶'], ['回答者，意見を述べる']];
+    const out = applySpeakerPrefixes(rows, {
+      prefixes: ['司会', '回答者'],
+      punctuations: [',', '，'],
+      allowSpace: true,
+      continueOnUnmatched: false,
+    });
+    expect(out).toEqual([
+      ['司会', '開会の挨拶'],
+      ['回答者', '意見を述べる'],
+    ]);
+  });
+
+  it('returns input unchanged when no prefixes given', () => {
+    const rows = [['普通の行 1'], ['普通の行 2']];
+    const out = applySpeakerPrefixes(rows, {
+      prefixes: [],
+      punctuations: [':'],
+      allowSpace: true,
+      continueOnUnmatched: false,
+    });
+    expect(out).toEqual(rows);
+  });
+
+  it('passes multi-column rows through unchanged (tabular path)', () => {
+    const rows = [['Q', '質問列'], ['A', '回答列']];
+    const out = applySpeakerPrefixes(rows, {
+      prefixes: ['Q', 'A'],
+      punctuations: [':'],
+      allowSpace: true,
+      continueOnUnmatched: false,
+    });
+    expect(out).toEqual(rows);
   });
 });

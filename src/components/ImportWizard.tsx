@@ -5,6 +5,7 @@ import { useProjectStore } from '../stores/projectStore.js';
 import { formatCardCode, isValidParticipantCode, newId } from '../domain/ids.js';
 import { nextCardSerial } from '../domain/cards.js';
 import {
+  applySpeakerPrefixes,
   buildCommentsAsCards,
   buildCommentsAsSegments,
   buildImport,
@@ -20,6 +21,7 @@ import {
   type ImportPattern,
   type ImportPlan,
   type InterviewImportPlan,
+  type SpeakerPrefixOptions,
   type SurveyImportPlan,
 } from '../domain/importPlan.js';
 import { splitTextIntoSegments } from '../domain/segments.js';
@@ -100,6 +102,14 @@ export function ImportWizard({ open, onClose }: Props) {
   // a card whose body is the full segment text.  Defaults to true because
   // questionnaire free-text answers usually become cards 1:1.
   const [surveyAutoCardEachRow, setSurveyAutoCardEachRow] = useState<boolean>(true);
+  // 発言者プレフィクス（フリーテキスト用）．既定: 半角・全角コロン + 末尾空白許容．
+  const [speakerPrefixesText, setSpeakerPrefixesText] = useState<string>('');
+  const [speakerPunctColon, setSpeakerPunctColon] = useState<boolean>(true);
+  const [speakerPunctColonFW, setSpeakerPunctColonFW] = useState<boolean>(true);
+  const [speakerPunctComma, setSpeakerPunctComma] = useState<boolean>(false);
+  const [speakerPunctCommaFW, setSpeakerPunctCommaFW] = useState<boolean>(false);
+  const [speakerAllowSpace, setSpeakerAllowSpace] = useState<boolean>(true);
+  const [speakerContinue, setSpeakerContinue] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   const STEPS = useMemo(
@@ -130,21 +140,63 @@ export function ImportWizard({ open, onClose }: Props) {
       setCommentAuthor('tag');
       setAuthorRemap({});
       setSurveyAutoCardEachRow(true);
+      setSpeakerPrefixesText('');
+      setSpeakerPunctColon(true);
+      setSpeakerPunctColonFW(true);
+      setSpeakerPunctComma(false);
+      setSpeakerPunctCommaFW(false);
+      setSpeakerAllowSpace(true);
+      setSpeakerContinue(true);
       setError(null);
     }
   }, [open, project]);
 
+  /** 発言者プレフィクス検出に使うオプション．プレフィクスが 1 つも未入力なら無効． */
+  const speakerOpts: SpeakerPrefixOptions | null = useMemo(() => {
+    const list = speakerPrefixesText
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (list.length === 0) return null;
+    const puncts: string[] = [];
+    if (speakerPunctColon) puncts.push(':');
+    if (speakerPunctColonFW) puncts.push('：');
+    if (speakerPunctComma) puncts.push(',');
+    if (speakerPunctCommaFW) puncts.push('，');
+    return {
+      prefixes: list,
+      punctuations: puncts,
+      allowSpace: speakerAllowSpace,
+      continueOnUnmatched: speakerContinue,
+    };
+  }, [
+    speakerPrefixesText,
+    speakerPunctColon,
+    speakerPunctColonFW,
+    speakerPunctComma,
+    speakerPunctCommaFW,
+    speakerAllowSpace,
+    speakerContinue,
+  ]);
+
   /** Parsed row preview based on the chosen parse mode. */
   const rows: string[][] = useMemo(() => {
     if (!file) return [];
+    let base: string[][];
     if (file.rows && file.rows.length > 0) {
       // xlsx/csv: use structured rows directly when in 'tabular' mode; otherwise reflatten
       if (parseMode === 'tabular') return file.rows;
       const lines = file.rows.map((r) => r.join('\t')).filter((l) => l.length > 0);
-      return wrapLines(lines, parseMode, fixedBreaks, sentenceDelims);
+      base = wrapLines(lines, parseMode, fixedBreaks, sentenceDelims);
+    } else {
+      base = wrapLines(splitToLines(file.text), parseMode, fixedBreaks, sentenceDelims);
     }
-    return wrapLines(splitToLines(file.text), parseMode, fixedBreaks, sentenceDelims);
-  }, [file, parseMode, fixedBreaks, sentenceDelims]);
+    // 非 tabular 経路でのみ発言者プレフィクスを適用（[speaker, body] の 2 列化）
+    if (speakerOpts && parseMode !== 'tabular') {
+      return applySpeakerPrefixes(base, speakerOpts);
+    }
+    return base;
+  }, [file, parseMode, fixedBreaks, sentenceDelims, speakerOpts]);
 
   // Initialise column spec when rows change and we land on the columns step
   useEffect(() => {
@@ -603,6 +655,20 @@ export function ImportWizard({ open, onClose }: Props) {
                 dataStartIdx={dataStartIdx}
                 setDataStartIdx={setDataStartIdx}
                 rows={rows}
+                speakerPrefixesText={speakerPrefixesText}
+                setSpeakerPrefixesText={setSpeakerPrefixesText}
+                speakerPunctColon={speakerPunctColon}
+                setSpeakerPunctColon={setSpeakerPunctColon}
+                speakerPunctColonFW={speakerPunctColonFW}
+                setSpeakerPunctColonFW={setSpeakerPunctColonFW}
+                speakerPunctComma={speakerPunctComma}
+                setSpeakerPunctComma={setSpeakerPunctComma}
+                speakerPunctCommaFW={speakerPunctCommaFW}
+                setSpeakerPunctCommaFW={setSpeakerPunctCommaFW}
+                speakerAllowSpace={speakerAllowSpace}
+                setSpeakerAllowSpace={setSpeakerAllowSpace}
+                speakerContinue={speakerContinue}
+                setSpeakerContinue={setSpeakerContinue}
               />
             )}
 
@@ -844,6 +910,20 @@ function ParseStep({
   dataStartIdx,
   setDataStartIdx,
   rows,
+  speakerPrefixesText,
+  setSpeakerPrefixesText,
+  speakerPunctColon,
+  setSpeakerPunctColon,
+  speakerPunctColonFW,
+  setSpeakerPunctColonFW,
+  speakerPunctComma,
+  setSpeakerPunctComma,
+  speakerPunctCommaFW,
+  setSpeakerPunctCommaFW,
+  speakerAllowSpace,
+  setSpeakerAllowSpace,
+  speakerContinue,
+  setSpeakerContinue,
 }: {
   file: ReadTextFileResult | null;
   parseMode: ParseMode;
@@ -857,6 +937,20 @@ function ParseStep({
   dataStartIdx: number;
   setDataStartIdx: (i: number) => void;
   rows: string[][];
+  speakerPrefixesText: string;
+  setSpeakerPrefixesText: (s: string) => void;
+  speakerPunctColon: boolean;
+  setSpeakerPunctColon: (b: boolean) => void;
+  speakerPunctColonFW: boolean;
+  setSpeakerPunctColonFW: (b: boolean) => void;
+  speakerPunctComma: boolean;
+  setSpeakerPunctComma: (b: boolean) => void;
+  speakerPunctCommaFW: boolean;
+  setSpeakerPunctCommaFW: (b: boolean) => void;
+  speakerAllowSpace: boolean;
+  setSpeakerAllowSpace: (b: boolean) => void;
+  speakerContinue: boolean;
+  setSpeakerContinue: (b: boolean) => void;
 }) {
   const isTabular = file?.rows && file.rows.length > 0;
   return (
@@ -953,6 +1047,95 @@ function ParseStep({
         dataStartIdx={dataStartIdx}
         setDataStartIdx={setDataStartIdx}
       />
+
+      {parseMode !== 'tabular' && (
+        <details
+          style={{
+            marginTop: 6,
+            marginBottom: 6,
+            padding: 8,
+            background: 'var(--bg-elev-2)',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+          }}
+          open={speakerPrefixesText.length > 0}
+        >
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+            発言者プレフィクス（任意．インタビュー文字起こし向け）
+          </summary>
+          <p className="muted small" style={{ marginTop: 6 }}>
+            各行の冒頭にある発言者ラベル（例: <code>Q</code> / <code>A</code> / <code>司会</code>）
+            を入力すると，原文セグメントの「話者」列に切り出されます．
+            プレフィクスは 1 行 1 つ．末尾の区切り文字や空白は下のチェックで柔軟化できます．
+          </p>
+          <div className="form-row" style={{ alignItems: 'flex-start' }}>
+            <label style={{ paddingTop: 4 }}>プレフィクス</label>
+            <textarea
+              value={speakerPrefixesText}
+              onChange={(e) => setSpeakerPrefixesText(e.target.value)}
+              placeholder={'Q\nA\n司会\n学生1'}
+              rows={4}
+              style={{ width: 220, fontFamily: 'monospace', fontSize: 12 }}
+            />
+            <div className="muted small" style={{ marginLeft: 8, flex: 1 }}>
+              長いプレフィクスが優先（学生10 と 学生1 が両方あれば長い方を先に試す）．
+            </div>
+          </div>
+          <div className="form-row" style={{ flexWrap: 'wrap', gap: 12 }}>
+            <span className="small">区切り文字（複数選択可）:</span>
+            <label className="small">
+              <input
+                type="checkbox"
+                checked={speakerPunctColon}
+                onChange={(e) => setSpeakerPunctColon(e.target.checked)}
+              />{' '}
+              半角コロン <code>:</code>
+            </label>
+            <label className="small">
+              <input
+                type="checkbox"
+                checked={speakerPunctColonFW}
+                onChange={(e) => setSpeakerPunctColonFW(e.target.checked)}
+              />{' '}
+              全角コロン <code>：</code>
+            </label>
+            <label className="small">
+              <input
+                type="checkbox"
+                checked={speakerPunctComma}
+                onChange={(e) => setSpeakerPunctComma(e.target.checked)}
+              />{' '}
+              半角コンマ <code>,</code>
+            </label>
+            <label className="small">
+              <input
+                type="checkbox"
+                checked={speakerPunctCommaFW}
+                onChange={(e) => setSpeakerPunctCommaFW(e.target.checked)}
+              />{' '}
+              全角コンマ <code>，</code>
+            </label>
+          </div>
+          <div className="form-row" style={{ flexWrap: 'wrap', gap: 12 }}>
+            <label className="small">
+              <input
+                type="checkbox"
+                checked={speakerAllowSpace}
+                onChange={(e) => setSpeakerAllowSpace(e.target.checked)}
+              />{' '}
+              末尾の空白を許容（区切り文字なしでも空白で分離可）
+            </label>
+            <label className="small">
+              <input
+                type="checkbox"
+                checked={speakerContinue}
+                onChange={(e) => setSpeakerContinue(e.target.checked)}
+              />{' '}
+              区切れない行は直前の話者を引き継ぐ
+            </label>
+          </div>
+        </details>
+      )}
 
       <div className="preview" style={{ marginTop: 6 }}>
         <div className="preview-meta">

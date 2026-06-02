@@ -572,19 +572,32 @@ export function makeRenameParticipantCommand(
  * (#1) Delete a whole imported file: soft-delete its segments AND remove any
  * participants that become orphaned (no remaining active segments and no
  * cards).  Caller computes `orphanedParticipants`.  Undo restores both.
+ *
+ * カスケード削除: ユーザー要望により，このファイル由来のセグメントを
+ * 1 つでも参照しているカードは連鎖削除する（card_source_links / card_positions
+ * / group_memberships も併せて消去 → Undo で復元）．
  */
 export function makeDeleteFileCommand(
   segmentIds: string[],
   now: string,
   prevDeletedAtById: Record<string, string | null>,
-  orphanedParticipants: Participant[]
+  orphanedParticipants: Participant[],
+  cascadedCards: Card[] = [],
+  cascadedLinks: CardSourceLink[] = [],
+  cascadedPositions: CardPosition[] = [],
+  cascadedMemberships: GroupMembership[] = []
 ): DomainCommand {
   const targets = new Set(segmentIds);
   const orphanIds = new Set(orphanedParticipants.map((p) => p.id));
+  const cascadedCardIds = new Set(cascadedCards.map((c) => c.id));
+  const cascadedLinkIds = new Set(cascadedLinks.map((l) => l.id));
+  const cascadedMembershipIds = new Set(cascadedMemberships.map((m) => m.id));
   const partLabel =
     orphanedParticipants.length > 0 ? ` + ${orphanedParticipants.length} 参加者` : '';
+  const cardLabel =
+    cascadedCards.length > 0 ? ` + ${cascadedCards.length} カード` : '';
   return {
-    label: `ファイル削除: ${segmentIds.length} セグメント${partLabel}`,
+    label: `ファイル削除: ${segmentIds.length} セグメント${partLabel}${cardLabel}`,
     apply: (d) => ({
       ...d,
       source_segments: d.source_segments.map((s) =>
@@ -594,6 +607,22 @@ export function makeDeleteFileCommand(
         orphanIds.size > 0
           ? d.participants.filter((p) => !orphanIds.has(p.id))
           : d.participants,
+      cards:
+        cascadedCardIds.size > 0
+          ? d.cards.filter((c) => !cascadedCardIds.has(c.id))
+          : d.cards,
+      card_source_links:
+        cascadedLinkIds.size > 0
+          ? d.card_source_links.filter((l) => !cascadedLinkIds.has(l.id))
+          : d.card_source_links,
+      card_positions:
+        cascadedCardIds.size > 0
+          ? d.card_positions.filter((p) => !cascadedCardIds.has(p.cardId))
+          : d.card_positions,
+      group_memberships:
+        cascadedMembershipIds.size > 0
+          ? d.group_memberships.filter((m) => !cascadedMembershipIds.has(m.id))
+          : d.group_memberships,
     }),
     revert: (d) => ({
       ...d,
@@ -604,6 +633,19 @@ export function makeDeleteFileCommand(
         orphanedParticipants.length > 0
           ? [...d.participants, ...orphanedParticipants]
           : d.participants,
+      cards: cascadedCards.length > 0 ? [...d.cards, ...cascadedCards] : d.cards,
+      card_source_links:
+        cascadedLinks.length > 0
+          ? [...d.card_source_links, ...cascadedLinks]
+          : d.card_source_links,
+      card_positions:
+        cascadedPositions.length > 0
+          ? [...d.card_positions, ...cascadedPositions]
+          : d.card_positions,
+      group_memberships:
+        cascadedMemberships.length > 0
+          ? [...d.group_memberships, ...cascadedMemberships]
+          : d.group_memberships,
     }),
   };
 }

@@ -1,6 +1,6 @@
 [package]
 name = "kj-trace-tauri"
-version = "0.2.3"
+version = "0.2.4"
 description = "KJ Trace Studio (Tauri 統合版)."
 edition = "2021"
 rust-version = "1.77"

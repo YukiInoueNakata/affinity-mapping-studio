@@ -255,20 +255,22 @@ export function HierarchyPane({ onClose }: { onClose(): void }) {
                     if (n.kind === 'card') selectCard(n.id);
                     else if (n.group) selectGroup(n.id);
                   }}
-                  onContextMenu={
-                    n.kind === 'card'
-                      ? (e) => {
-                          e.preventDefault();
-                          selectCard(n.id);
-                          // (#6) 右クリックでそのカードのキャンバス位置へジャンプ.
-                          // App がキャンバスタブへ切替え後 kj.centerOnCard を再発行.
-                          window.dispatchEvent(
-                            new CustomEvent('kj.jumpToCard', { detail: { cardId: n.id } })
-                          );
-                        }
-                      : undefined
-                  }
-                  title={n.kind === 'card' ? '右クリックでキャンバス表示' : undefined}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    if (n.kind === 'card') {
+                      selectCard(n.id);
+                      window.dispatchEvent(
+                        new CustomEvent('kj.jumpToCard', { detail: { cardId: n.id } })
+                      );
+                    } else if (n.group) {
+                      // 2026-06-02 ユーザー要望: グループも右クリックで選択 + ジャンプ
+                      selectGroup(n.id);
+                      window.dispatchEvent(
+                        new CustomEvent('kj.jumpToGroup', { detail: { groupId: n.id } })
+                      );
+                    }
+                  }}
+                  title="右クリックでキャンバスへジャンプ"
                 >
                   {n.kind === 'group' && n.hasChildren ? (
                     <button

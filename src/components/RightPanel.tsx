@@ -1020,22 +1020,22 @@ interface LabelTabsProps {
   labelId: string | null;
 }
 
-const LABEL_TABS: Array<{
+/** メモ用タブ（表札は独立扱い．2026-06-02 のリクエストで分離） */
+const LABEL_MEMO_TABS: Array<{
   field: TextRevisionFieldName;
   label: string;
   placeholder: string;
   rows: number;
 }> = [
-  { field: 'text', label: '表札', placeholder: '（表札を入力）', rows: 3 },
   { field: 'sharedMemo', label: '共有メモ', placeholder: 'チームで共有する解釈', rows: 8 },
   { field: 'basisMemo', label: '根拠メモ', placeholder: 'なぜこうまとめたか', rows: 8 },
   { field: 'holdMemo', label: '保留メモ', placeholder: '迷い・後で検討する点', rows: 8 },
 ];
 
 function LabelTabs({ drafts, setDrafts, commitField, labelId }: LabelTabsProps) {
-  const [active, setActive] = useState<TextRevisionFieldName>('text');
+  const [active, setActive] = useState<TextRevisionFieldName>('sharedMemo');
   const [historyOpen, setHistoryOpen] = useState(false);
-  const current = LABEL_TABS.find((t) => t.field === active) ?? LABEL_TABS[0];
+  const current = LABEL_MEMO_TABS.find((t) => t.field === active) ?? LABEL_MEMO_TABS[0];
   const project = useProjectStore((s) => s.project);
   const applyCommand = useProjectStore((s) => s.applyCommand);
   const label = useMemo(() => {
@@ -1048,10 +1048,35 @@ function LabelTabs({ drafts, setDrafts, commitField, labelId }: LabelTabsProps) 
     current.field === 'holdMemo';
   const memoEntries =
     label && isMemoField ? label.memoLogs?.[current.field as 'sharedMemo'] ?? [] : [];
+
+  // 表札専用 textarea: Enter で確定 (commit + blur)，Ctrl+Enter / Shift+Enter で改行．
+  const onLabelTextKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      commitField('text');
+      (e.target as HTMLTextAreaElement).blur();
+    }
+  };
+
   return (
-    <section className="panel-section">
+    <>
+      {/* 表札 (text) は独立セクション．ユーザー要望で常時表示 (タブ化しない)． */}
+      <section className="panel-section">
+        <h3 style={{ marginTop: 0, marginBottom: 4 }}>表札</h3>
+        <textarea
+          value={drafts.text ?? ''}
+          onChange={(e) => setDrafts((d) => ({ ...d, text: e.target.value }))}
+          onBlur={() => commitField('text')}
+          onKeyDown={onLabelTextKeyDown}
+          rows={3}
+          placeholder="（表札を入力．Enter で確定，Ctrl+Enter で改行）"
+          style={{ width: '100%', boxSizing: 'border-box' }}
+        />
+      </section>
+      {/* メモ 3 種だけタブ化 */}
+      <section className="panel-section">
       <div className="label-tabs-row">
-        {LABEL_TABS.map((t) => {
+        {LABEL_MEMO_TABS.map((t) => {
           const hasContent = (drafts[t.field] ?? '').trim().length > 0;
           return (
             <button
@@ -1127,6 +1152,7 @@ function LabelTabs({ drafts, setDrafts, commitField, labelId }: LabelTabsProps) 
         <RevisionHistoryDialog labelId={labelId} onClose={() => setHistoryOpen(false)} />
       )}
     </section>
+    </>
   );
 }
 

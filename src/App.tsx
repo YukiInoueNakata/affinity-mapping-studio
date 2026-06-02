@@ -233,6 +233,24 @@ export function App() {
 
   // (#3) 画面全体のズーム.  Ctrl/Cmd + Plus/Minus/0 で UI 全体 (ペイン・リボン・
   // キャンバス) のスケールを変える.  WebView2/Chromium の `zoom` を使う.
+  // sync デバッグオーバーレイ表示フラグ．既定 OFF．localStorage に永続化．
+  // トラブルシュート時のみオンにする想定．
+  const [showDebugOverlay, setShowDebugOverlay] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage.getItem('kj.showDebugOverlay') === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('kj.showDebugOverlay', showDebugOverlay ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }, [showDebugOverlay]);
+
   const [uiScale, setUiScale] = useState<number>(() => {
     try {
       const v = parseFloat(localStorage.getItem('kj.uiScale') ?? '1');
@@ -308,23 +326,41 @@ export function App() {
       window.removeEventListener('kj.requestSourceView', handler as EventListener);
   }, [setMode]);
 
-  // (#6) 階層表示から「キャンバスで表示」: KJ モード + canvas タブへ切替えてから
-  // CanvasView がマウント済みのタイミングで kj.centerOnCard を再発行する.
+  // (#6) 階層表示・検索から「キャンバスで表示」: KJ モード + canvas タブへ切替えてから
+  // CanvasView がマウント済みのタイミングで kj.centerOnCard / kj.centerOnGroup を再発行する.
   useEffect(() => {
-    const handler = (ev: Event) => {
+    const cardHandler = (ev: Event) => {
       const cardId = (ev as CustomEvent).detail?.cardId as string | undefined;
       if (!cardId) return;
       setMode('kj');
       setCenterTab('canvas');
-      // 次フレーム以降に CanvasView がマウントされてから中心化する.
       window.setTimeout(() => {
         window.dispatchEvent(
           new CustomEvent('kj.centerOnCard', { detail: { cardId } })
         );
+        // 配置ペイン (未分類・分類保留) でも目的のカードまでスクロール
+        window.dispatchEvent(
+          new CustomEvent('kj.scrollToCard', { detail: { cardId } })
+        );
       }, 120);
     };
-    window.addEventListener('kj.jumpToCard', handler as EventListener);
-    return () => window.removeEventListener('kj.jumpToCard', handler as EventListener);
+    const groupHandler = (ev: Event) => {
+      const groupId = (ev as CustomEvent).detail?.groupId as string | undefined;
+      if (!groupId) return;
+      setMode('kj');
+      setCenterTab('canvas');
+      window.setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent('kj.centerOnGroup', { detail: { groupId } })
+        );
+      }, 120);
+    };
+    window.addEventListener('kj.jumpToCard', cardHandler as EventListener);
+    window.addEventListener('kj.jumpToGroup', groupHandler as EventListener);
+    return () => {
+      window.removeEventListener('kj.jumpToCard', cardHandler as EventListener);
+      window.removeEventListener('kj.jumpToGroup', groupHandler as EventListener);
+    };
   }, [setMode]);
 
   const onNew = useCallback(() => {
@@ -1073,27 +1109,29 @@ export function App() {
             </button>
           )}
           {__INCLUDE_SYNC__ && <SyncStatusBadge onOpenConnect={() => setSyncDialogOpen(true)} />}
-          {/* 2026-06-02 デバッグオーバーレイ: dev tools が開けない環境向け．store 状態を常時表示． */}
-          <div
-            style={{
-              position: 'fixed',
-              bottom: 6,
-              right: 6,
-              fontSize: 10,
-              padding: '4px 8px',
-              background: 'rgba(0,0,0,0.7)',
-              color: '#9efc7e',
-              fontFamily: 'monospace',
-              borderRadius: 4,
-              zIndex: 9999,
-              pointerEvents: 'none',
-            }}
-          >
-            cards={project?.data.cards.length ?? '-'}
-            {' '}segs={project?.data.source_segments.length ?? '-'}
-            {' '}groups={project?.data.groups.length ?? '-'}
-            {' '}sync={syncSnapshot.status}{syncSnapshot.synced ? '✓' : ''}
-          </div>
+          {/* 2026-06-02 デバッグオーバーレイ: トグルで ON/OFF．既定 OFF． */}
+          {showDebugOverlay && (
+            <div
+              style={{
+                position: 'fixed',
+                bottom: 6,
+                right: 6,
+                fontSize: 10,
+                padding: '4px 8px',
+                background: 'rgba(0,0,0,0.7)',
+                color: '#9efc7e',
+                fontFamily: 'monospace',
+                borderRadius: 4,
+                zIndex: 9999,
+                pointerEvents: 'none',
+              }}
+            >
+              cards={project?.data.cards.length ?? '-'}
+              {' '}segs={project?.data.source_segments.length ?? '-'}
+              {' '}groups={project?.data.groups.length ?? '-'}
+              {' '}sync={syncSnapshot.status}{syncSnapshot.synced ? '✓' : ''}
+            </div>
+          )}
           {/* 分析モード切替 (KJ / M-GTA / GTA) は当面 KJ のみのため UI 上は非表示．
               データ構造・型 (AppMode) は温存しており，将来再有効化可能． */}
         </div>
@@ -1268,6 +1306,15 @@ export function App() {
                     </button>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDebugOverlay((v) => !v)}
+                  title="同期デバッグオーバーレイ（画面右下に store 状態表示）"
+                  style={{ fontSize: 10, marginLeft: 6, padding: '2px 8px' }}
+                  className={showDebugOverlay ? 'rb-btn-active' : ''}
+                >
+                  debug {showDebugOverlay ? 'ON' : 'OFF'}
+                </button>
               </RibbonSection>
               <RibbonSection label="連携">
                 <button

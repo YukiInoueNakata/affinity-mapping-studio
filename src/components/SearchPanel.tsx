@@ -17,6 +17,15 @@ function dispatchJumpToCard(cardId: string) {
     // ignore (jsdom 環境などで CustomEvent が無いケース)
   }
 }
+function dispatchJumpToGroup(groupId: string) {
+  try {
+    window.dispatchEvent(
+      new CustomEvent('kj.jumpToGroup', { detail: { groupId } })
+    );
+  } catch {
+    // ignore
+  }
+}
 
 const KIND_LABEL: Record<SearchHitKind, string> = {
   card: 'カード',
@@ -98,8 +107,12 @@ export function SearchPanel({ onJumpTo }: Props) {
                       if (h.kind === 'card') {
                         selectCard(h.refId);
                         dispatchJumpToCard(h.refId);
+                      } else if (h.kind === 'group') {
+                        dispatchJumpToGroup(h.refId);
+                      } else if (h.kind === 'label' && h.groupId) {
+                        // label の refId は label.id なので，groupId を使う
+                        dispatchJumpToGroup(h.groupId);
                       } else {
-                        // 非カード行は通常ジャンプと同等
                         onJumpTo(h);
                       }
                     }}

@@ -51,7 +51,7 @@ function GroupNodeImpl({ id, data, selected }: NodeProps<GroupNodeData>) {
   const startRect = useRef<ResizeRect | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
-  const editInputRef = useRef<HTMLInputElement | null>(null);
+  const editInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // 編集モードに入った瞬間に input にフォーカスし全選択
   useEffect(() => {
@@ -267,9 +267,8 @@ function GroupNodeImpl({ id, data, selected }: NodeProps<GroupNodeData>) {
             {isCollapsed ? '▶' : '▼'}
           </button>
           {editing ? (
-            <input
+            <textarea
               ref={editInputRef}
-              type="text"
               className="kj-group-node-title-input"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -278,7 +277,9 @@ function GroupNodeImpl({ id, data, selected }: NodeProps<GroupNodeData>) {
               onBlur={commitEdit}
               onKeyDown={(e) => {
                 e.stopPropagation();
-                if (e.key === 'Enter') {
+                if (e.nativeEvent.isComposing) return;
+                // Enter で確定（Ctrl+Enter / Shift+Enter は改行を許可）
+                if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
                   e.preventDefault();
                   commitEdit();
                 } else if (e.key === 'Escape') {
@@ -286,12 +287,15 @@ function GroupNodeImpl({ id, data, selected }: NodeProps<GroupNodeData>) {
                   cancelEdit();
                 }
               }}
+              rows={1}
               style={{
                 fontSize: data.effectiveFontSize,
                 fontWeight: data.effectiveFontWeight,
                 color: data.effectiveColor,
                 flex: 1,
                 minWidth: 80,
+                resize: 'none',
+                fontFamily: 'inherit',
               }}
             />
           ) : (

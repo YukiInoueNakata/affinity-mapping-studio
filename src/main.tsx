@@ -4,10 +4,24 @@ import { createRoot } from 'react-dom/client';
 // renderer modules that touch `window.api`.
 import './api/tauri-bridge.js';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getVersion } from '@tauri-apps/api/app';
 import { App } from './App.js';
 import { SourceWindow } from './SourceWindow.js';
 import { useProjectStore } from './stores/projectStore.js';
 import './styles.css';
+
+// ウィンドウタイトルを「KJ Studio v0.x.y」形式に動的設定．
+// 旧名「KJ Trace Studio」を「KJ Studio」へ変更 (2026-06-02)．
+(async () => {
+  try {
+    const v = await getVersion();
+    const win = getCurrentWebviewWindow();
+    const base = win.label === 'source' ? 'KJ Studio — 原文ビューア' : 'KJ Studio';
+    await win.setTitle(`${base} v${v}`);
+  } catch (e) {
+    console.warn('setTitle failed', e);
+  }
+})();
 
 // Debug handle: lets DevTools console inspect the store.
 // `__kj.store.getState().project.data.cards.length`

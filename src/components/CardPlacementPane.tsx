@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import {
   effectivePlacement,
@@ -62,6 +62,24 @@ function PlacementSection({
   const [shuffleOrder, setShuffleOrder] = useState<string[] | null>(null);
   const [filter, setFilter] = useState<string>('');
   const kbScroll = useKeyboardScroll();
+  // 2026-06-02: ジャンプで対象カードまでスクロールするための ref マップ．
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const cardId = (ev as CustomEvent).detail?.cardId as string | undefined;
+      if (!cardId) return;
+      const el = cardRefs.current.get(cardId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 強調アニメーション
+        el.classList.add('placement-card-flash');
+        setTimeout(() => el.classList.remove('placement-card-flash'), 1200);
+      }
+    };
+    window.addEventListener('kj.scrollToCard', handler as EventListener);
+    return () => window.removeEventListener('kj.scrollToCard', handler as EventListener);
+  }, []);
 
   // フィルタ後カード．カードコード（ID）と本文の双方を部分一致．
   const filteredCards = useMemo(() => {
@@ -228,6 +246,10 @@ function PlacementSection({
           {orderedCards.map((c) => (
             <div
               key={c.id}
+              ref={(el) => {
+                if (el) cardRefs.current.set(c.id, el);
+                else cardRefs.current.delete(c.id);
+              }}
               className={`placement-card ${c.id === selectedCardId ? 'active' : ''}`}
               draggable
               onDragStart={(e) => handleDragStart(e, c.id)}

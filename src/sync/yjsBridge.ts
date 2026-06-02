@@ -96,7 +96,16 @@ function recordToYMap(tableName: TableName, record: Record<string, unknown>): Y.
   return m;
 }
 
-function yMapToRecord(m: Y.Map<unknown>): Record<string, unknown> {
+function yMapToRecord(m: Y.Map<unknown> | Record<string, unknown> | unknown): Record<string, unknown> {
+  // 防御 (2026-06-02 incident): サーバー側のスクリプト不具合等で YArray に
+  // 素オブジェクトが格納されているケースに備える．素オブジェクトなら shallow
+  // copy して返し，crash を避ける．
+  if (!(m instanceof Y.Map)) {
+    if (m && typeof m === 'object' && !Array.isArray(m)) {
+      return { ...(m as Record<string, unknown>) };
+    }
+    return {};
+  }
   const r: Record<string, unknown> = {};
   m.forEach((v, k) => {
     if (v instanceof Y.Text) {

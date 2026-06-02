@@ -133,6 +133,26 @@ function CanvasViewImpl() {
     return () => window.removeEventListener('kj.centerOnCard', handler as EventListener);
   }, [setCenter, fitView]);
 
+  // 2026-06-02: グループへのジャンプ．group_positions の中心へビューを移動 + 選択．
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const groupId = (ev as CustomEvent).detail?.groupId as string | undefined;
+      if (!groupId) return;
+      const proj = useProjectStore.getState().project;
+      if (!proj) return;
+      useProjectStore.getState().selectGroup(groupId);
+      const gp = proj.data.group_positions.find((p) => p.groupId === groupId);
+      if (gp) {
+        // group_positions の x,y は左上．中心へ補正．
+        setCenter(gp.x + gp.width / 2, gp.y + gp.height / 2, { zoom: 0.85, duration: 400 });
+      } else {
+        fitView({ padding: 0.2, duration: 300 });
+      }
+    };
+    window.addEventListener('kj.centerOnGroup', handler as EventListener);
+    return () => window.removeEventListener('kj.centerOnGroup', handler as EventListener);
+  }, [setCenter, fitView]);
+
   const project = useProjectStore((s) => s.project);
   const selectedCardId = useProjectStore((s) => s.selectedCardId);
   const selectedCardIds = useProjectStore((s) => s.selectedCardIds);

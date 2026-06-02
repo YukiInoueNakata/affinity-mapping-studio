@@ -563,7 +563,16 @@ textarea {
   background: var(--bg-elev);
   display: flex;
   flex-direction: column;
+  /* 幅 360px に収まりきらない要素はスクロール / 縦は overflow-y で全要素を見せる */
   overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 右ペイン内のボタン群を必ず折り返しで全部見せる */
+.right-panel .right-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .panel-section {
@@ -615,11 +624,21 @@ textarea {
 
 /* (#9) 右ペイン (カード詳細) の各セクションは高さ手動調整を無効化.
  * カード詳細 / 原文参照 の間のリサイズハンドルは不要との要望. 自然な高さ +
- * 必要時スクロールに任せる. */
+ * 必要時スクロールに任せる.
+ * 2026-06-02: 「下に余裕があるのに幅で隠れる」問題に対応．max-height を解除し，
+ * 全要素が縦に並んで全て表示されるようにする．横方向で溢れる場合は wrap で対応． */
 .right-panel .panel-section {
   resize: none;
   height: auto;
-  max-height: 50vh;
+  max-height: none;
+  overflow: visible;
+}
+
+/* セクション内のテキスト・ラベル類は必ず折り返し */
+.right-panel .panel-section,
+.right-panel .panel-section * {
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* Search section: also section-level scroll + resize so its scrollbar
@@ -1268,6 +1287,13 @@ textarea {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* 修正 (2026-06-02): height 伝播が中途半端だったため flex:1 + height:100%
+   * を併用して必ず親の縦幅いっぱいに広がるようにする．これで内側の
+   * .placement-list が overflow し scrollbar が出るようになる． */
+  flex: 1 1 0;
+  height: 100%;
+  align-self: stretch;
+  overflow: hidden;
 }
 
 .placement-pane-right {
@@ -1393,6 +1419,15 @@ textarea {
   margin-bottom: 6px;
   cursor: grab;
   font-size: 11px;
+}
+
+/* 2026-06-02: ジャンプ時にカードを一瞬強調するアニメーション */
+@keyframes kj-placement-flash {
+  0%   { box-shadow: 0 0 0 2px rgba(94, 158, 252, 0.9); }
+  100% { box-shadow: 0 0 0 2px rgba(94, 158, 252, 0); }
+}
+.placement-card-flash {
+  animation: kj-placement-flash 1.2s ease-out;
 }
 
 .placement-card:active {

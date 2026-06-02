@@ -113,12 +113,16 @@ class SyncManager {
     this.bridge = bridge;
     this.provider = provider;
 
-    // Connect the bridge to the store so applyCommand / observe flow.
-    // CRITICAL: only seed the store's project INTO the doc when the doc is
-    // empty.  When the cache restored data (hadCache), seeding would delete it
-    // and propagate destructive CRDT deletes to the server.  Instead we hydrate
-    // the store FROM the doc so the cached/offline data shows immediately.
-    useProjectStore.getState().attachSyncBridge(bridge, { seed: !hadCache });
+    // バグ修正 (2026-06-02 incident): 旧コードは hadCache=false ＋ ローカルプロジェクト
+    // 非 null 時に attachSyncBridge({ seed: true }) を呼んでサーバーの Y.Doc を
+    // ローカルの (時に空の) 状態で seed し直していた．これが CRDT 経由で他クライアント
+    // のカードを全削除する事故を起こした．
+    //
+    // 安全な方針: connect では絶対に seed しない (= サーバー側のデータを破壊しない)．
+    // ローカルプロジェクトをルームに転送したい場合は明示的に uploadProject() を
+    // 呼ぶ運用とする．attachSyncBridge は seed=false で，hydrateFromBridge で
+    // サーバー / IndexedDB からのデータをローカル store へ反映する．
+    useProjectStore.getState().attachSyncBridge(bridge, { seed: false });
     if (hadCache) {
       useProjectStore.getState().hydrateFromBridge(bridge);
     }

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ProjectFile } from '@shared/types/project';
+import { makeEmptyProject, type ProjectFile } from '@shared/types/project';
 import type { DisplaySettings, ProjectData } from '@shared/types/domain';
 import type { DomainCommand } from './commands.js';
 import type { YjsSyncBridge } from '../sync/yjsBridge.js';
@@ -421,13 +421,34 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     // into mirrorToBridge.
     _unsubscribeRemote = bridge.observe((remoteData) => {
       const { project: cur } = get();
-      if (!cur) return;
       _applyingRemote = true;
       try {
-        set({
-          project: withData(cur, remoteData),
-          isDirty: true,
-        });
+        if (cur) {
+          set({
+            project: withData(cur, remoteData),
+            isDirty: true,
+          });
+        } else {
+          // 2026-06-02 incident 修正: 旧コードは cur=null 時に remoteData を破棄して
+          // いたため，ローカルプロジェクト未ロードで接続した場合にサーバーデータが
+          // store に流れず「カード 0 表示」を起こした．代わりに metadata 込みの
+          // 空 ProjectFile を合成して反映する．
+          const meta = bridge.toMetadata() ?? {};
+          const now = new Date().toISOString();
+          const shell = makeEmptyProject(
+            (meta as { name?: string }).name ?? '(リモートルーム)',
+            (meta as { project_id?: string }).project_id ?? `remote-${now}`,
+            (meta as { created_at?: string }).created_at ?? now
+          );
+          set({
+            project: {
+              ...shell,
+              metadata: { ...shell.metadata, ...meta, updated_at: now },
+              data: remoteData,
+            },
+            isDirty: false,
+          });
+        }
       } finally {
         _applyingRemote = false;
       }
@@ -436,19 +457,37 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
   hydrateFromBridge(bridge) {
     const { project: cur } = get();
-    if (!cur) return;
     _applyingRemote = true;
     try {
       const data = bridge.toProjectData();
       const meta = bridge.toMetadata();
-      set({
-        project: {
-          ...withData(cur, data),
-          metadata: meta ? { ...cur.metadata, ...meta } : cur.metadata,
-        },
-        // Cache load is not a user edit; don't mark dirty.
-        isDirty: false,
-      });
+      if (cur) {
+        set({
+          project: {
+            ...withData(cur, data),
+            metadata: meta ? { ...cur.metadata, ...meta } : cur.metadata,
+          },
+          // Cache load is not a user edit; don't mark dirty.
+          isDirty: false,
+        });
+      } else {
+        // 2026-06-02 incident 修正: cur=null 時もリモート/キャッシュデータから合成．
+        const m = meta ?? {};
+        const now = new Date().toISOString();
+        const shell = makeEmptyProject(
+          (m as { name?: string }).name ?? '(リモートルーム)',
+          (m as { project_id?: string }).project_id ?? `remote-${now}`,
+          (m as { created_at?: string }).created_at ?? now
+        );
+        set({
+          project: {
+            ...shell,
+            metadata: { ...shell.metadata, ...m, updated_at: now },
+            data,
+          },
+          isDirty: false,
+        });
+      }
     } finally {
       _applyingRemote = false;
     }

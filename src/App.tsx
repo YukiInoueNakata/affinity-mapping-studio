@@ -251,20 +251,33 @@ export function App() {
   useEffect(() => {
     const onZoomKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
-      // '=' は Shift 無しの '+' キー位置.  テンキー '+' は 'Add'.
-      if (e.key === '+' || e.key === '=' || e.key === 'Add') {
+      if (e.isComposing) return; // IME 変換中はスキップ
+      // JIS / US / テンキー / Shift 修飾の各バリアントをすべて拾う．
+      // e.key (文字), e.code (物理キー) の双方で判定して取りこぼし防止．
+      const k = e.key;
+      const code = e.code;
+      const isPlus =
+        k === '+' || k === '=' || k === 'Add' ||
+        (k === ';' && e.shiftKey) || // JIS で Shift+; が +
+        code === 'Equal' || code === 'NumpadAdd' || code === 'Semicolon';
+      const isMinus =
+        k === '-' || k === '_' || k === 'Subtract' ||
+        code === 'Minus' || code === 'NumpadSubtract';
+      const isZero = k === '0' || code === 'Digit0' || code === 'Numpad0';
+      if (isPlus) {
         e.preventDefault();
         setUiScale((s) => Math.min(2.5, Math.round((s + 0.1) * 10) / 10));
-      } else if (e.key === '-' || e.key === 'Subtract') {
+      } else if (isMinus) {
         e.preventDefault();
         setUiScale((s) => Math.max(0.5, Math.round((s - 0.1) * 10) / 10));
-      } else if (e.key === '0') {
+      } else if (isZero) {
         e.preventDefault();
         setUiScale(1);
       }
     };
-    window.addEventListener('keydown', onZoomKey);
-    return () => window.removeEventListener('keydown', onZoomKey);
+    // capture フェーズで拾うと input 内でも先に preventDefault できる
+    window.addEventListener('keydown', onZoomKey, true);
+    return () => window.removeEventListener('keydown', onZoomKey, true);
   }, []);
 
   const onJumpTo = useCallback(
@@ -338,6 +351,25 @@ export function App() {
     loadProject(null, p);
     setSyncDialogOpen(true);
   }, [isDirty, loadProject]);
+
+  // UI スケール変更ヘルパ．既存の uiScale state (line ~248) を直接更新．
+  // リボンの「表示倍率」ボタン群からも使う．
+  const adjustUiScale = useCallback(
+    (next: number) => {
+      const clamped = Math.max(0.5, Math.min(2.5, Math.round(next * 10) / 10));
+      setUiScale(clamped);
+    },
+    [setUiScale]
+  );
+  const zoomIn = useCallback(
+    () => setUiScale((s) => Math.min(2.5, Math.round((s + 0.1) * 10) / 10)),
+    [setUiScale]
+  );
+  const zoomOut = useCallback(
+    () => setUiScale((s) => Math.max(0.5, Math.round((s - 0.1) * 10) / 10)),
+    [setUiScale]
+  );
+  const zoomReset = useCallback(() => setUiScale(1), [setUiScale]);
 
   const onOpen = useCallback(async () => {
     if (isDirty && !confirm('未保存の変更があります。破棄して別のプロジェクトを開きますか？')) return;
@@ -1152,6 +1184,69 @@ export function App() {
                   <span className="rb-glyph">↓</span>
                   <span>テキスト取り込み</span>
                 </button>
+              </RibbonSection>
+              <RibbonSection label="表示倍率">
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                    alignItems: 'stretch',
+                    padding: '0 4px',
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={zoomOut}
+                      title="表示を縮小 (Ctrl + -)"
+                      style={{ width: 32 }}
+                    >
+                      −
+                    </button>
+                    <span
+                      className="muted small"
+                      style={{ minWidth: 40, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}
+                      title="現在の表示倍率"
+                    >
+                      {Math.round(uiScale * 100)}%
+                    </span>
+                    <button
+                      type="button"
+                      onClick={zoomIn}
+                      title="表示を拡大 (Ctrl + +)"
+                      style={{ width: 32 }}
+                    >
+                      ＋
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={() => adjustUiScale(0.85)}
+                      title="文字を小さく (85%)"
+                      style={{ flex: 1, fontSize: 10 }}
+                    >
+                      小
+                    </button>
+                    <button
+                      type="button"
+                      onClick={zoomReset}
+                      title="標準に戻す (Ctrl + 0)"
+                      style={{ flex: 1, fontSize: 11 }}
+                    >
+                      標準
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustUiScale(1.25)}
+                      title="文字を大きく (125%)"
+                      style={{ flex: 1, fontSize: 14 }}
+                    >
+                      大
+                    </button>
+                  </div>
+                </div>
               </RibbonSection>
               <RibbonSection label="連携">
                 <button

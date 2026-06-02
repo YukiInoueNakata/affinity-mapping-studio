@@ -1347,8 +1347,28 @@ textarea {
    * height — otherwise overflow-y: auto never engages and the scrollbar never
    * appears when there are many cards. (#4) */
   min-height: 0;
-  overflow-y: auto;
+  /* スクロールバーを常時表示．overflow:auto だと非スクロール時に
+   * バーが消えて下端への到達が分かりにくいため scroll を強制． */
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
   padding: 6px;
+}
+
+/* WebKit (Tauri WebView) のスクロールバーを淡くカスタム描画して常時可視化． */
+.placement-list::-webkit-scrollbar {
+  width: 10px;
+}
+.placement-list::-webkit-scrollbar-track {
+  background: var(--bg-elev-2, #1e2229);
+  border-radius: 5px;
+}
+.placement-list::-webkit-scrollbar-thumb {
+  background: var(--border, #3a3f47);
+  border-radius: 5px;
+  min-height: 24px;
+}
+.placement-list::-webkit-scrollbar-thumb:hover {
+  background: var(--accent, #5a90c8);
 }
 
 .placement-card {

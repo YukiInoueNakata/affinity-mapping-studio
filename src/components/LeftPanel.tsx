@@ -20,6 +20,16 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
   const selectParticipant = useProjectStore((s) => s.selectParticipant);
   const selectSegment = useProjectStore((s) => s.selectSegment);
   const applyCommand = useProjectStore((s) => s.applyCommand);
+  // 2026-06-02: 表示・非表示フィルタ
+  const hiddenParticipantIds = useProjectStore((s) => s.hiddenParticipantIds);
+  const hiddenGroupIds = useProjectStore((s) => s.hiddenGroupIds);
+  const hiddenTags = useProjectStore((s) => s.hiddenTags);
+  const toggleParticipantVisible = useProjectStore((s) => s.toggleParticipantVisible);
+  const toggleGroupVisible = useProjectStore((s) => s.toggleGroupVisible);
+  const toggleTagVisible = useProjectStore((s) => s.toggleTagVisible);
+  const hiddenPartSet = useMemo(() => new Set(hiddenParticipantIds), [hiddenParticipantIds]);
+  const hiddenGroupSet = useMemo(() => new Set(hiddenGroupIds), [hiddenGroupIds]);
+  const hiddenTagSet = useMemo(() => new Set(hiddenTags), [hiddenTags]);
 
   // (#2) 参加者名のインライン編集 (右クリックで開始)
   const [renamingPid, setRenamingPid] = useState<string | null>(null);
@@ -152,10 +162,12 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
           >
             すべて表示
           </li>
-          {project?.data.participants.map((p) => (
+          {project?.data.participants.map((p) => {
+            const isHidden = hiddenPartSet.has(p.id);
+            return (
             <li
               key={p.id}
-              className={selectedParticipantId === p.id ? 'active' : ''}
+              className={`${selectedParticipantId === p.id ? 'active' : ''} ${isHidden ? 'kj-vis-hidden' : ''}`}
               onClick={() => {
                 if (renamingPid !== p.id) selectParticipant(p.id);
               }}
@@ -166,6 +178,15 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
               }}
               title="右クリックで名前を変更"
             >
+              <button
+                type="button"
+                className={`kj-vis-toggle ${isHidden ? 'hidden' : 'shown'}`}
+                onClick={(e) => { e.stopPropagation(); toggleParticipantVisible(p.id); }}
+                title={isHidden ? 'キャンバスで表示する' : 'キャンバスで非表示にする'}
+                aria-label={isHidden ? '非表示' : '表示中'}
+              >
+                {isHidden ? '×' : '○'}
+              </button>
               <strong>{p.code}</strong>{' '}
               {renamingPid === p.id ? (
                 <input
@@ -189,7 +210,8 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
                 {cardCountByParticipant.get(p.id) ?? 0}
               </span>
             </li>
-          ))}
+            );
+          })}
           {(!project || project.data.participants.length === 0) && (
             <li className="muted">(まだ参加者がありません)</li>
           )}
@@ -199,15 +221,26 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
       <section className="panel-section">
         <h3>グループ ({groupsWithCounts.length})</h3>
         <ul className="participant-list">
-          {groupsWithCounts.map(({ group, label, count, depth }) => (
+          {groupsWithCounts.map(({ group, label, count, depth }) => {
+            const isHidden = hiddenGroupSet.has(group.id);
+            return (
             <li
               key={group.id}
               className={`${group.id === selectedGroupId ? 'active' : ''} ${
                 depth > 0 ? 'group-indent' : ''
-              } ${group.level >= 2 ? 'group-parent' : ''}`}
+              } ${group.level >= 2 ? 'group-parent' : ''} ${isHidden ? 'kj-vis-hidden' : ''}`}
               style={depth > 0 ? { paddingLeft: 12 + depth * 14 } : undefined}
               onClick={() => selectGroup(group.id)}
             >
+              <button
+                type="button"
+                className={`kj-vis-toggle ${isHidden ? 'hidden' : 'shown'}`}
+                onClick={(e) => { e.stopPropagation(); toggleGroupVisible(group.id); }}
+                title={isHidden ? 'キャンバスで表示する' : 'キャンバスで非表示にする'}
+                aria-label={isHidden ? '非表示' : '表示中'}
+              >
+                {isHidden ? '×' : '○'}
+              </button>
               <strong>{(label?.text || group.name).slice(0, 24)}</strong>
               {group.level >= 2 ? (
                 <span className="counts">{levelPrefix(group.level)}</span>
@@ -215,7 +248,8 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
                 <span className="counts">{count} 枚</span>
               )}
             </li>
-          ))}
+            );
+          })}
           {groupsWithCounts.length === 0 && (
             <li className="muted">(まだグループがありません)</li>
           )}
@@ -243,17 +277,31 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
             )}
           </h3>
           <div className="search-filter-row">
-            {sortedTags.map(([tag, n]) => (
-              <button
-                key={tag}
-                type="button"
-                className={`chip ${selectedTags.has(tag) ? 'active' : ''}`}
-                onClick={() => toggleTag(tag)}
-                title={`${tag} (${n} 件)`}
-              >
-                {tag} <span style={{ opacity: 0.6 }}>{n}</span>
-              </button>
-            ))}
+            {sortedTags.map(([tag, n]) => {
+              const isHidden = hiddenTagSet.has(tag);
+              return (
+              <span key={tag} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                <button
+                  type="button"
+                  className={`chip ${selectedTags.has(tag) ? 'active' : ''} ${isHidden ? 'kj-vis-hidden' : ''}`}
+                  onClick={() => toggleTag(tag)}
+                  title={`${tag} (${n} 件)`}
+                >
+                  {tag} <span style={{ opacity: 0.6 }}>{n}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`kj-vis-toggle ${isHidden ? 'hidden' : 'shown'}`}
+                  onClick={(e) => { e.stopPropagation(); toggleTagVisible(tag); }}
+                  title={isHidden ? 'キャンバスで表示する' : 'キャンバスで非表示にする'}
+                  aria-label={isHidden ? '非表示' : '表示中'}
+                  style={{ fontSize: 10 }}
+                >
+                  {isHidden ? '×' : '○'}
+                </button>
+              </span>
+              );
+            })}
           </div>
           {selectedTags.size > 0 && (
             <div className="muted small" style={{ marginTop: 4 }}>

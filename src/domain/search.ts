@@ -41,13 +41,33 @@ export function buildSearchDocs(data: ProjectData): SearchDoc[] {
   const cardGroupId = new Map<string, string>();
   for (const m of data.group_memberships) cardGroupId.set(m.cardId, m.groupId);
 
+  // 参加者コードを引いて participantPrefix を補完できるようにする (merged 元コード生成用)
+  const participantCodeById = new Map(data.participants.map((p) => [p.id, p.code]));
   for (const c of data.cards) {
+    // 2026-06-02: カードのメモ (memoLog) + タグも検索対象に含める．
+    const memoBlob = (c.memoLog ?? []).map((m) => m.text).filter(Boolean).join(' / ');
+    const tagBlob = (c.tags ?? []).join(' ');
+    // 2026-06-02: 統合元カード (mergedFrom) の旧 code も body に含めて検索可能に．
+    // title は表示用なので c.code のまま．body に旧コードを混ぜることで
+    // 「統合前の P02-003」検索で統合後のカードもヒットする．
+    let mergedCodes = '';
+    if (c.mergedFrom && c.mergedFrom.length > 0) {
+      const partCode = participantCodeById.get(c.participantId);
+      if (partCode) {
+        mergedCodes = c.mergedFrom
+          .map((n) => `${partCode}-${String(n).padStart(3, '0')}`)
+          .join(' ');
+      }
+    }
+    const body = [c.body, memoBlob, tagBlob, mergedCodes]
+      .filter((s) => s && s.length > 0)
+      .join(' / ');
     docs.push({
       id: `card:${c.id}`,
       kind: 'card',
       refId: c.id,
       title: c.code,
-      body: c.body,
+      body,
       participantId: c.participantId,
       groupId: cardGroupId.get(c.id) ?? null,
     });
@@ -64,23 +84,34 @@ export function buildSearchDocs(data: ProjectData): SearchDoc[] {
     });
   }
   for (const g of data.groups) {
+    // 2026-06-02: グループの叙述メモ (narrative) も検索対象に．
     docs.push({
       id: `group:${g.id}`,
       kind: 'group',
       refId: g.id,
       title: g.name,
-      body: g.name,
+      body: [g.name, g.narrative].filter((s) => s && s.length > 0).join(' / '),
       participantId: null,
       groupId: g.id,
     });
   }
   for (const l of data.labels) {
+    // 2026-06-02: 表札 + 3 種メモ + メモログ全エントリも検索対象に．
+    const logEntries: string[] = [];
+    if (l.memoLogs) {
+      for (const key of ['sharedMemo', 'basisMemo', 'holdMemo'] as const) {
+        const arr = l.memoLogs[key];
+        if (arr) for (const m of arr) if (m.text) logEntries.push(m.text);
+      }
+    }
     docs.push({
       id: `label:${l.id}`,
       kind: 'label',
       refId: l.groupId,
       title: l.text || '(無題の表札)',
-      body: [l.text, l.sharedMemo, l.basisMemo, l.holdMemo].filter(Boolean).join(' / '),
+      body: [l.text, l.sharedMemo, l.basisMemo, l.holdMemo, ...logEntries]
+        .filter((s) => s && s.length > 0)
+        .join(' / '),
       participantId: null,
       groupId: l.groupId,
     });

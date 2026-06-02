@@ -772,6 +772,36 @@ describe('applySpeakerPrefixes', () => {
     expect(out).toEqual(rows);
   });
 
+  it('allowNoSeparator (default true) strips prefix even without separator', () => {
+    // 「面接者では…」のように区切り文字も空白も無いケース．
+    const rows = [
+      ['面接者では、まず事前アンケートの方を確認します'],
+      ['被面接者上原です'],
+    ];
+    const out = applySpeakerPrefixes(rows, {
+      prefixes: ['面接者', '被面接者'],
+      punctuations: [],
+      allowSpace: false,
+      continueOnUnmatched: false,
+    });
+    expect(out).toEqual([
+      ['面接者', 'では、まず事前アンケートの方を確認します'],
+      ['被面接者', '上原です'],
+    ]);
+  });
+
+  it('allowNoSeparator=false requires explicit separator', () => {
+    const rows = [['面接者では…']];
+    const out = applySpeakerPrefixes(rows, {
+      prefixes: ['面接者'],
+      punctuations: [':', '：'],
+      allowSpace: true,
+      allowNoSeparator: false,
+      continueOnUnmatched: false,
+    });
+    expect(out).toEqual([['', '面接者では…']]);
+  });
+
   it('passes multi-column rows through unchanged (tabular path)', () => {
     const rows = [['Q', '質問列'], ['A', '回答列']];
     const out = applySpeakerPrefixes(rows, {

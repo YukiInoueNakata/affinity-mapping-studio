@@ -66,6 +66,9 @@ export function App() {
   const applyCommand = useProjectStore((s) => s.applyCommand);
   const mode = useProjectStore((s) => s.mode);
   const setMode = useProjectStore((s) => s.setMode);
+  // 2026-06-02: キャンバス操作モード (pan / select) — リボンと canvas 内に表示
+  const canvasMode = useProjectStore((s) => s.canvasInteractionMode);
+  const setCanvasMode = useProjectStore((s) => s.setCanvasInteractionMode);
 
   const [centerTab, setCenterTab] = useState<CenterTab>('canvas');
   const [ribbonTab, setRibbonTab] = useState<
@@ -683,22 +686,31 @@ export function App() {
     AlignNodeInput & { kind: 'card' | 'group' }
   > | null => {
     if (!project) return null;
+    // 2026-06-02 修正: カード高さに固定値 100 を使うと，本文が長いカードで
+    // 整列後に被ってしまう（ご報告のバグ）．React Flow がレンダリングした
+    // 実測サイズを window.__kjGetNodeSize 経由で取得し，無ければ従来固定値．
     const CARD_W = 220;
     const CARD_H = 100;
+    const getSize = (window as unknown as {
+      __kjGetNodeSize?: (id: string) => { width: number; height: number } | null;
+    }).__kjGetNodeSize;
+    const measure = (id: string, fallbackW: number, fallbackH: number) => {
+      if (!getSize) return { width: fallbackW, height: fallbackH };
+      const s = getSize(id);
+      return s ?? { width: fallbackW, height: fallbackH };
+    };
     const out: Array<AlignNodeInput & { kind: 'card' | 'group' }> = [];
     for (const cid of selectedCardIds) {
       const card = project.data.cards.find((c) => c.id === cid);
       if (!card) continue;
       const pos = project.data.card_positions.find((p) => p.cardId === cid);
       if (!pos) continue;
-      out.push({
-        id: cid,
-        kind: 'card',
-        x: pos.x,
-        y: pos.y,
-        width: card.collapsed ? 80 : CARD_W,
-        height: card.collapsed ? 32 : CARD_H,
-      });
+      const { width, height } = measure(
+        cid,
+        card.collapsed ? 80 : CARD_W,
+        card.collapsed ? 32 : CARD_H
+      );
+      out.push({ id: cid, kind: 'card', x: pos.x, y: pos.y, width, height });
     }
     for (const gid of selectedGroupIds) {
       const pos = project.data.group_positions.find((p) => p.groupId === gid);
@@ -725,14 +737,12 @@ export function App() {
         if (!card) continue;
         const pos = project.data.card_positions.find((p) => p.cardId === id);
         if (!pos) continue;
-        fb.push({
+        const { width, height } = measure(
           id,
-          kind: 'card',
-          x: pos.x,
-          y: pos.y,
-          width: card.collapsed ? 80 : CARD_W,
-          height: card.collapsed ? 32 : CARD_H,
-        });
+          card.collapsed ? 80 : CARD_W,
+          card.collapsed ? 32 : CARD_H
+        );
+        fb.push({ id, kind: 'card', x: pos.x, y: pos.y, width, height });
       }
       return fb.length >= 2 ? fb : null;
     }
@@ -906,6 +916,10 @@ export function App() {
           .sort((a, b) => a.code.localeCompare(b.code));
         const CARD_W = 220;
         const CARD_H = 100;
+        // 2026-06-02: 実測サイズを優先（被り回避）
+        const getSize = (window as unknown as {
+          __kjGetNodeSize?: (id: string) => { width: number; height: number } | null;
+        }).__kjGetNodeSize;
         type T = AlignNodeInput & { kind: 'card' | 'group' };
         targets = cardsInOrder
           .map((c): T | null => {
@@ -913,13 +927,16 @@ export function App() {
               (p) => p.cardId === c.id
             );
             if (!pos) return null;
+            const fallbackW = c.collapsed ? 80 : CARD_W;
+            const fallbackH = c.collapsed ? 32 : CARD_H;
+            const measured = getSize?.(c.id);
             return {
               id: c.id,
               kind: 'card',
               x: pos.x,
               y: pos.y,
-              width: c.collapsed ? 80 : CARD_W,
-              height: c.collapsed ? 32 : CARD_H,
+              width: measured?.width ?? fallbackW,
+              height: measured?.height ?? fallbackH,
             };
           })
           .filter((t): t is T => t !== null);
@@ -1378,6 +1395,27 @@ export function App() {
                 >
                   <span className="rb-glyph">↷</span>
                   <span>Redo</span>
+                </button>
+              </RibbonSection>
+              {/* 2026-06-02: キャンバス操作モード (移動 / 範囲選択) */}
+              <RibbonSection label="操作モード">
+                <button
+                  type="button"
+                  className={`rb-btn-lg ${canvasMode === 'pan' ? 'rb-btn-active' : ''}`}
+                  onClick={() => setCanvasMode('pan')}
+                  title="キャンバスをドラッグで視点移動（ノードクリックで個別選択）"
+                >
+                  <span className="rb-glyph">✥</span>
+                  <span>移動</span>
+                </button>
+                <button
+                  type="button"
+                  className={`rb-btn-lg ${canvasMode === 'select' ? 'rb-btn-active' : ''}`}
+                  onClick={() => setCanvasMode('select')}
+                  title="キャンバスをドラッグで矩形範囲選択"
+                >
+                  <span className="rb-glyph">□</span>
+                  <span>範囲</span>
                 </button>
               </RibbonSection>
               <RibbonSection label="タグ">

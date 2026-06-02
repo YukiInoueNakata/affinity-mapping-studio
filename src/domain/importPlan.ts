@@ -31,6 +31,70 @@ export interface ColumnSpec {
   /** Header label as shown in the wizard.  For role='custom' this becomes the
    *  customFields key.  For role='auto_card' this becomes the card body source. */
   label: string;
+  /** 2026-06-02: 行フィルタ．この列の値で行を選別する．undefined ならフィルタ無し． */
+  filter?: ColumnFilter;
+}
+
+/** 行フィルタ仕様．列の値を文字列／数値として評価し，true の行のみ取り込む． */
+export type ColumnFilter =
+  | { kind: 'equals'; value: string; caseInsensitive?: boolean }
+  | { kind: 'not_equals'; value: string; caseInsensitive?: boolean }
+  | { kind: 'contains'; value: string; caseInsensitive?: boolean }
+  | { kind: 'not_contains'; value: string; caseInsensitive?: boolean }
+  | { kind: 'gte'; value: number }
+  | { kind: 'lte'; value: number }
+  | { kind: 'between'; min: number; max: number }
+  | { kind: 'non_empty' }
+  | { kind: 'empty' };
+
+/** 1 つの列フィルタを 1 つのセル値に適用．true なら通過 / false ならその行は除外． */
+export function applyColumnFilter(cell: string | undefined, f: ColumnFilter): boolean {
+  const raw = cell ?? '';
+  const trimmed = raw.trim();
+  switch (f.kind) {
+    case 'non_empty':
+      return trimmed.length > 0;
+    case 'empty':
+      return trimmed.length === 0;
+    case 'equals':
+    case 'not_equals': {
+      const a = f.caseInsensitive ? trimmed.toLowerCase() : trimmed;
+      const b = f.caseInsensitive ? f.value.toLowerCase() : f.value;
+      const eq = a === b;
+      return f.kind === 'equals' ? eq : !eq;
+    }
+    case 'contains':
+    case 'not_contains': {
+      const a = f.caseInsensitive ? trimmed.toLowerCase() : trimmed;
+      const b = f.caseInsensitive ? f.value.toLowerCase() : f.value;
+      const has = b.length > 0 && a.includes(b);
+      return f.kind === 'contains' ? has : !has;
+    }
+    case 'gte': {
+      const n = Number(trimmed);
+      if (!Number.isFinite(n)) return false;
+      return n >= f.value;
+    }
+    case 'lte': {
+      const n = Number(trimmed);
+      if (!Number.isFinite(n)) return false;
+      return n <= f.value;
+    }
+    case 'between': {
+      const n = Number(trimmed);
+      if (!Number.isFinite(n)) return false;
+      return n >= f.min && n <= f.max;
+    }
+  }
+}
+
+/** すべての列フィルタを 1 つの行に対して AND 評価する． */
+export function passesAllFilters(row: string[], columns: ColumnSpec[]): boolean {
+  for (const c of columns) {
+    if (!c.filter) continue;
+    if (!applyColumnFilter(row[c.index], c.filter)) return false;
+  }
+  return true;
 }
 
 export interface InterviewImportPlan {
@@ -157,15 +221,17 @@ export function splitBySentenceDelimiters(text: string, delimiters: string): str
  *
  *  punctuations: プレフィクスの直後に許容する区切り文字（複数選択）．
  *    例: [':', '：'] なら半角・全角コロンの両方を受け入れる．
- *    空集合 + allowSpace=false の場合，プレフィクス直後がそのまま本文．
- *  allowSpace: 区切り文字の前後に空白を許容する．
- *  continueOnUnmatched: マッチしない行を直前話者の続きとして扱う（true）か，
- *    話者空欄で本文だけ扱う（false）か．
+ *  allowSpace: プレフィクス直後の空白を区切りとして許容する．
+ *  allowNoSeparator: 区切り文字も空白も無くても，プレフィクス文字列の直後
+ *    から本文として扱う．例: 「面接者では…」を「面接者」「では…」に分割．
+ *    既定 true．
+ *  continueOnUnmatched: マッチしない行を直前話者の続きとして扱う．
  */
 export interface SpeakerPrefixOptions {
   prefixes: string[];
   punctuations: string[];
   allowSpace: boolean;
+  allowNoSeparator?: boolean;
   continueOnUnmatched: boolean;
 }
 
@@ -185,34 +251,65 @@ export function applySpeakerPrefixes(
   if (valid.length === 0) return rows;
   // 長いプレフィクスを先に試す（短いものに食われないよう）
   const sorted = [...valid].sort((a, b) => b.length - a.length);
-  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const puncts = opts.punctuations.filter((c) => c.length > 0);
-  const punctClass =
-    puncts.length > 0 ? `[${puncts.map(escapeRe).join('')}]` : '';
-  const optionalSp = opts.allowSpace ? '\\s*' : '';
-  const headRegex = new RegExp(
-    `^${optionalSp}(${sorted.map(escapeRe).join('|')})${optionalSp}${
-      punctClass.length > 0 ? `(?:${punctClass})${optionalSp}` : (opts.allowSpace ? '\\s+' : '')
-    }`
-  );
+  const puncts = new Set(opts.punctuations.filter((c) => c.length > 0));
+  const allowSpace = opts.allowSpace;
+  // 既定 true: 区切り文字も空白も無く，プレフィクス直後から本文．
+  // 「面接者では…」のようなケースを「面接者」「では…」に分割するため．
+  const allowNoSeparator = opts.allowNoSeparator !== false;
   let lastSpeaker = '';
   const out: string[][] = [];
+  const isSpace = (ch: string): boolean => /\s/.test(ch);
   for (const row of rows) {
     if (row.length !== 1) {
       out.push(row);
       continue;
     }
-    const line = row[0] ?? '';
-    const m = headRegex.exec(line);
-    if (m) {
-      const speaker = m[1];
-      const rest = line.slice(m[0].length);
-      out.push([speaker, rest]);
-      lastSpeaker = speaker;
+    const raw = row[0] ?? '';
+    // 先頭空白は無視してマッチ判定に入る
+    let leadStripped = raw;
+    while (leadStripped.length > 0 && isSpace(leadStripped[0])) {
+      leadStripped = leadStripped.slice(1);
+    }
+    let matched: { speaker: string; rest: string } | null = null;
+    for (const p of sorted) {
+      if (!leadStripped.startsWith(p)) continue;
+      let i = p.length;
+      // プレフィクス直後の空白
+      let consumedSpace = false;
+      while (allowSpace && i < leadStripped.length && isSpace(leadStripped[i])) {
+        i++;
+        consumedSpace = true;
+      }
+      // 句読点があれば 1 文字消費 + 後続空白
+      let consumedPunct = false;
+      if (i < leadStripped.length && puncts.has(leadStripped[i])) {
+        i++;
+        consumedPunct = true;
+        while (allowSpace && i < leadStripped.length && isSpace(leadStripped[i])) {
+          i++;
+        }
+      }
+      if (consumedPunct) {
+        matched = { speaker: p, rest: leadStripped.slice(i) };
+        break;
+      }
+      if (consumedSpace) {
+        matched = { speaker: p, rest: leadStripped.slice(i) };
+        break;
+      }
+      if (allowNoSeparator) {
+        // 区切り無しでも認める．例: 「面接者では…」→「面接者」「では…」
+        matched = { speaker: p, rest: leadStripped.slice(i) };
+        break;
+      }
+    }
+    if (matched) {
+      out.push([matched.speaker, matched.rest]);
+      lastSpeaker = matched.speaker;
     } else if (opts.continueOnUnmatched && lastSpeaker.length > 0) {
-      out.push([lastSpeaker, line]);
+      out.push([lastSpeaker, raw]);
     } else {
-      out.push(['', line]);
+      out.push(['', raw]);
     }
   }
   return out;
@@ -280,6 +377,11 @@ export function buildImport(
 
   for (let r = startRow; r < rows.length; r++) {
     const row = rows[r] ?? [];
+    // 2026-06-02: 列フィルタ評価．全フィルタを満たさない行は除外．
+    if (!passesAllFilters(row, plan.columns)) {
+      skipped.push({ rowIndex: r, reason: '列フィルタで除外' });
+      continue;
+    }
     const bodyParts = bodyCols
       .map((c) => (row[c.index] ?? '').trim())
       .filter((s) => s.length > 0);

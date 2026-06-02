@@ -5,6 +5,7 @@ import { useProjectStore } from '../stores/projectStore.js';
 import { formatCardCode, isValidParticipantCode, newId } from '../domain/ids.js';
 import { nextCardSerial } from '../domain/cards.js';
 import {
+  applyColumnFilter,
   applySpeakerPrefixes,
   buildCommentsAsCards,
   buildCommentsAsSegments,
@@ -14,6 +15,7 @@ import {
   parseFixedWidthText,
   splitBySentenceDelimiters,
   validatePlan,
+  type ColumnFilter,
   type ColumnRole,
   type ColumnSpec,
   type CommentAuthorHandling,
@@ -82,7 +84,9 @@ export function ImportWizard({ open, onClose }: Props) {
 
   const [stepIdx, setStepIdx] = useState(0);
   const [file, setFile] = useState<ReadTextFileResult | null>(null);
-  const [parseMode, setParseMode] = useState<ParseMode>('blank-line');
+  // 2026-06-02: 区切り方法の既定を「行で区切り」に．インタビュー文字起こしで
+  // 1 行 1 セグメントの形が最も使いやすいとの要望．
+  const [parseMode, setParseMode] = useState<ParseMode>('line');
   const [fixedBreaks, setFixedBreaks] = useState<string>('10,20');
   const [sentenceDelims, setSentenceDelims] = useState<string>('。．');
   const [pattern, setPattern] = useState<ImportPattern>('interview');
@@ -109,6 +113,8 @@ export function ImportWizard({ open, onClose }: Props) {
   const [speakerPunctComma, setSpeakerPunctComma] = useState<boolean>(false);
   const [speakerPunctCommaFW, setSpeakerPunctCommaFW] = useState<boolean>(false);
   const [speakerAllowSpace, setSpeakerAllowSpace] = useState<boolean>(true);
+  // 2026-06-02: 区切り文字も空白も無いケース（例「面接者では…」）でも抽出．既定 ON．
+  const [speakerNoSeparator, setSpeakerNoSeparator] = useState<boolean>(true);
   const [speakerContinue, setSpeakerContinue] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -126,7 +132,7 @@ export function ImportWizard({ open, onClose }: Props) {
     if (open) {
       setStepIdx(0);
       setFile(null);
-      setParseMode('blank-line');
+      setParseMode('line');
       setFixedBreaks('10,20');
       setSentenceDelims('。．');
       setPattern('interview');
@@ -146,6 +152,7 @@ export function ImportWizard({ open, onClose }: Props) {
       setSpeakerPunctComma(false);
       setSpeakerPunctCommaFW(false);
       setSpeakerAllowSpace(true);
+      setSpeakerNoSeparator(true);
       setSpeakerContinue(true);
       setError(null);
     }
@@ -167,6 +174,7 @@ export function ImportWizard({ open, onClose }: Props) {
       prefixes: list,
       punctuations: puncts,
       allowSpace: speakerAllowSpace,
+      allowNoSeparator: speakerNoSeparator,
       continueOnUnmatched: speakerContinue,
     };
   }, [
@@ -176,6 +184,7 @@ export function ImportWizard({ open, onClose }: Props) {
     speakerPunctComma,
     speakerPunctCommaFW,
     speakerAllowSpace,
+    speakerNoSeparator,
     speakerContinue,
   ]);
 
@@ -265,7 +274,8 @@ export function ImportWizard({ open, onClose }: Props) {
     if (r.rows && r.rows.length > 0) {
       setParseMode('tabular');
     } else {
-      setParseMode('blank-line');
+      // 2026-06-02: テキスト系のデフォルトを「行で区切り」に
+      setParseMode('line');
     }
     // Reset wizard navigation so STEPS-array shape changes don't put us
     // on a now-missing step (e.g. switching from txt to xlsx removes parse)
@@ -294,6 +304,12 @@ export function ImportWizard({ open, onClose }: Props) {
 
   function setColumnLabel(idx: number, label: string) {
     setColumns((prev) => prev.map((c, i) => (i === idx ? { ...c, label } : c)));
+  }
+
+  function setColumnFilter(idx: number, filter: ColumnFilter | undefined) {
+    setColumns((prev) =>
+      prev.map((c, i) => (i === idx ? { ...c, filter } : c))
+    );
   }
 
   // Roles that allow multiple columns
@@ -667,6 +683,8 @@ export function ImportWizard({ open, onClose }: Props) {
                 setSpeakerPunctCommaFW={setSpeakerPunctCommaFW}
                 speakerAllowSpace={speakerAllowSpace}
                 setSpeakerAllowSpace={setSpeakerAllowSpace}
+                speakerNoSeparator={speakerNoSeparator}
+                setSpeakerNoSeparator={setSpeakerNoSeparator}
                 speakerContinue={speakerContinue}
                 setSpeakerContinue={setSpeakerContinue}
               />
@@ -699,6 +717,7 @@ export function ImportWizard({ open, onClose }: Props) {
                 setDataStartIdx={setDataStartIdx}
                 onRoleChange={setColumnRole}
                 onLabelChange={setColumnLabel}
+                onFilterChange={setColumnFilter}
                 planErrors={planErrors}
               />
             )}
@@ -765,15 +784,18 @@ export function ImportWizard({ open, onClose }: Props) {
             <button type="button" onClick={onClose}>
               キャンセル
             </button>
-            <button
-              type="button"
-              className="primary"
-              onClick={handleConfirm}
-              disabled={planErrors.length > 0 || rows.length === 0}
-              style={{ marginLeft: 6 }}
-            >
-              取り込む
-            </button>
+            {/* 2026-06-02: 「取り込む」は確認ステップ (最後) のときだけ表示 */}
+            {current.id === 'confirm' && (
+              <button
+                type="button"
+                className="primary"
+                onClick={handleConfirm}
+                disabled={planErrors.length > 0 || rows.length === 0}
+                style={{ marginLeft: 6 }}
+              >
+                取り込む
+              </button>
+            )}
           </div>
         </footer>
       </div>
@@ -922,6 +944,8 @@ function ParseStep({
   setSpeakerPunctCommaFW,
   speakerAllowSpace,
   setSpeakerAllowSpace,
+  speakerNoSeparator,
+  setSpeakerNoSeparator,
   speakerContinue,
   setSpeakerContinue,
 }: {
@@ -949,6 +973,8 @@ function ParseStep({
   setSpeakerPunctCommaFW: (b: boolean) => void;
   speakerAllowSpace: boolean;
   setSpeakerAllowSpace: (b: boolean) => void;
+  speakerNoSeparator: boolean;
+  setSpeakerNoSeparator: (b: boolean) => void;
   speakerContinue: boolean;
   setSpeakerContinue: (b: boolean) => void;
 }) {
@@ -958,6 +984,16 @@ function ParseStep({
       <div className="form-row">
         <label>区切り方法</label>
         <div className="radio-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+          {/* 2026-06-02: 「行で区切り」を最上位に．既定もこれ． */}
+          <label>
+            <input
+              type="radio"
+              name="parse-mode"
+              checked={parseMode === 'line'}
+              onChange={() => setParseMode('line')}
+            />
+            <strong>行で区切り (1 行 = 1 セグメント)</strong>
+          </label>
           {isTabular && (
             <label>
               <input
@@ -977,15 +1013,6 @@ function ParseStep({
               onChange={() => setParseMode('blank-line')}
             />
             空行で区切り (1 段落 = 1 セグメント)
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="parse-mode"
-              checked={parseMode === 'line'}
-              onChange={() => setParseMode('line')}
-            />
-            行で区切り (1 行 = 1 セグメント)
           </label>
           <label>
             <input
@@ -1068,18 +1095,15 @@ function ParseStep({
             を入力すると，原文セグメントの「話者」列に切り出されます．
             プレフィクスは 1 行 1 つ．末尾の区切り文字や空白は下のチェックで柔軟化できます．
           </p>
-          <div className="form-row" style={{ alignItems: 'flex-start' }}>
-            <label style={{ paddingTop: 4 }}>プレフィクス</label>
-            <textarea
-              value={speakerPrefixesText}
-              onChange={(e) => setSpeakerPrefixesText(e.target.value)}
-              placeholder={'Q\nA\n司会\n学生1'}
-              rows={4}
-              style={{ width: 220, fontFamily: 'monospace', fontSize: 12 }}
-            />
-            <div className="muted small" style={{ marginLeft: 8, flex: 1 }}>
-              長いプレフィクスが優先（学生10 と 学生1 が両方あれば長い方を先に試す）．
-            </div>
+          {/* 2026-06-02: chip ベースのプレフィクス入力．
+              入力欄に文字を打って Enter / カンマ / 半角空白で確定 → chip 化．
+              chip の × で削除．内部表現は speakerPrefixesText (\n separated). */}
+          <SpeakerPrefixChips
+            value={speakerPrefixesText}
+            onChange={setSpeakerPrefixesText}
+          />
+          <div className="muted small" style={{ marginTop: 2 }}>
+            長いプレフィクスが優先（学生10 と 学生1 が両方あれば長い方を先に試す）．
           </div>
           <div className="form-row" style={{ flexWrap: 'wrap', gap: 12 }}>
             <span className="small">区切り文字（複数選択可）:</span>
@@ -1117,6 +1141,14 @@ function ParseStep({
             </label>
           </div>
           <div className="form-row" style={{ flexWrap: 'wrap', gap: 12 }}>
+            <label className="small">
+              <input
+                type="checkbox"
+                checked={speakerNoSeparator}
+                onChange={(e) => setSpeakerNoSeparator(e.target.checked)}
+              />{' '}
+              <strong>区切り文字なしでも抽出</strong>（例: <code>面接者では…</code> を「面接者」+「では…」に分割）
+            </label>
             <label className="small">
               <input
                 type="checkbox"
@@ -1282,6 +1314,7 @@ function ColumnsStep({
   setDataStartIdx,
   onRoleChange,
   onLabelChange,
+  onFilterChange,
   planErrors,
 }: {
   pattern: ImportPattern;
@@ -1293,6 +1326,7 @@ function ColumnsStep({
   setDataStartIdx: (i: number) => void;
   onRoleChange: (idx: number, role: ColumnRole) => void;
   onLabelChange: (idx: number, label: string) => void;
+  onFilterChange: (idx: number, filter: ColumnFilter | undefined) => void;
   planErrors: string[];
 }) {
   const dataRows = rows.slice(Math.max(0, dataStartIdx));
@@ -1300,6 +1334,23 @@ function ColumnsStep({
   const visibleColumns =
     filter === 'used' ? columns.filter((c) => c.role !== 'ignore') : columns;
   const usedCount = columns.filter((c) => c.role !== 'ignore').length;
+  // 2026-06-02: 列フィルタを適用した結果，何行残るかを表示．
+  const filteredRowCount = useMemo(() => {
+    let n = 0;
+    for (const row of dataRows) {
+      let pass = true;
+      for (const c of columns) {
+        if (!c.filter) continue;
+        if (!applyColumnFilter(row[c.index], c.filter)) {
+          pass = false;
+          break;
+        }
+      }
+      if (pass) n++;
+    }
+    return n;
+  }, [dataRows, columns]);
+  const hasAnyFilter = columns.some((c) => !!c.filter);
   return (
     <div>
       <HeaderConfigBlock
@@ -1371,12 +1422,28 @@ function ColumnsStep({
         </div>
       )}
 
+      {hasAnyFilter && (
+        <div
+          className="muted small"
+          style={{
+            marginTop: 6,
+            padding: '4px 8px',
+            background: 'var(--bg-elev-2)',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+          }}
+        >
+          列フィルタ適用後: {filteredRowCount} / {dataRows.length} 行が取り込み対象
+        </div>
+      )}
+
       <table className="data-table" style={{ width: '100%', marginTop: 8 }}>
         <thead>
           <tr>
             <th style={{ width: 40 }}>#</th>
             <th style={{ width: 160 }}>列名</th>
             <th style={{ width: 180 }}>役割</th>
+            <th style={{ width: 220 }}>行フィルタ</th>
             <th>サンプル値</th>
           </tr>
         </thead>
@@ -1441,6 +1508,12 @@ function ColumnsStep({
                       → {nonEmptyCount} 行使用
                     </div>
                   )}
+                </td>
+                <td>
+                  <ColumnFilterEditor
+                    filter={c.filter}
+                    onChange={(f) => onFilterChange(i, f)}
+                  />
                 </td>
                 <td className="muted small">{previewText}</td>
               </tr>
@@ -1798,6 +1871,197 @@ function ConfirmStep({
       <p className="muted small" style={{ marginTop: 8 }}>
         「取り込む」を押すと 1 つの Undo にまとめて反映されます．
       </p>
+    </div>
+  );
+}
+
+/**
+ * 2026-06-02: 列フィルタ編集 UI．種別を select で選び、必要なら値入力．
+ * 「フィルタ無し」を選ぶと undefined にリセット．
+ */
+function ColumnFilterEditor({
+  filter,
+  onChange,
+}: {
+  filter: ColumnFilter | undefined;
+  onChange: (f: ColumnFilter | undefined) => void;
+}) {
+  const kind = filter?.kind ?? 'none';
+  const updateKind = (k: string) => {
+    if (k === 'none') return onChange(undefined);
+    if (k === 'non_empty' || k === 'empty') return onChange({ kind: k });
+    if (k === 'equals' || k === 'not_equals' || k === 'contains' || k === 'not_contains') {
+      return onChange({ kind: k, value: '' });
+    }
+    if (k === 'gte' || k === 'lte') return onChange({ kind: k, value: 0 });
+    if (k === 'between') return onChange({ kind: 'between', min: 0, max: 1 });
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11 }}>
+      <select
+        value={kind}
+        onChange={(e) => updateKind(e.target.value)}
+        style={{ width: '100%' }}
+      >
+        <option value="none">— フィルタ無し —</option>
+        <option value="non_empty">値あり</option>
+        <option value="empty">空欄</option>
+        <option value="equals">= 一致</option>
+        <option value="not_equals">≠ 一致しない</option>
+        <option value="contains">含む</option>
+        <option value="not_contains">含まない</option>
+        <option value="gte">≥ 以上 (数値)</option>
+        <option value="lte">≤ 以下 (数値)</option>
+        <option value="between">範囲 (数値 N≤x≤M)</option>
+      </select>
+      {filter && (filter.kind === 'equals' || filter.kind === 'not_equals' || filter.kind === 'contains' || filter.kind === 'not_contains') && (
+        <>
+          <input
+            type="text"
+            value={filter.value}
+            onChange={(e) => onChange({ ...filter, value: e.target.value })}
+            placeholder="比較値"
+            style={{ width: '100%' }}
+          />
+          <label className="small" style={{ fontSize: 10 }}>
+            <input
+              type="checkbox"
+              checked={!!filter.caseInsensitive}
+              onChange={(e) => onChange({ ...filter, caseInsensitive: e.target.checked })}
+            />{' '}
+            大文字小文字を無視
+          </label>
+        </>
+      )}
+      {filter && (filter.kind === 'gte' || filter.kind === 'lte') && (
+        <input
+          type="number"
+          value={Number.isFinite(filter.value) ? filter.value : 0}
+          onChange={(e) => onChange({ ...filter, value: Number(e.target.value) })}
+          placeholder="数値"
+          style={{ width: '100%' }}
+        />
+      )}
+      {filter && filter.kind === 'between' && (
+        <div style={{ display: 'flex', gap: 4 }}>
+          <input
+            type="number"
+            value={Number.isFinite(filter.min) ? filter.min : 0}
+            onChange={(e) => onChange({ ...filter, min: Number(e.target.value) })}
+            placeholder="最小"
+            style={{ width: '50%' }}
+          />
+          <span style={{ alignSelf: 'center' }}>〜</span>
+          <input
+            type="number"
+            value={Number.isFinite(filter.max) ? filter.max : 0}
+            onChange={(e) => onChange({ ...filter, max: Number(e.target.value) })}
+            placeholder="最大"
+            style={{ width: '50%' }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 2026-06-02: 発言者プレフィクスを chip 形式で入力させる小コンポーネント．
+ * value/onChange は \n 区切り文字列で，外側の state は既存のまま使い回せる．
+ */
+function SpeakerPrefixChips({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const items = value
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const [draft, setDraft] = useState('');
+  const commitDraft = () => {
+    const t = draft.trim();
+    if (t.length === 0) return;
+    if (items.includes(t)) {
+      setDraft('');
+      return;
+    }
+    onChange([...items, t].join('\n'));
+    setDraft('');
+  };
+  const remove = (s: string) => onChange(items.filter((x) => x !== s).join('\n'));
+  return (
+    <div className="form-row" style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
+      <label style={{ paddingTop: 4 }}>プレフィクス</label>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 4,
+          padding: 4,
+          border: '1px solid var(--border)',
+          borderRadius: 4,
+          background: 'var(--bg)',
+          minHeight: 32,
+          flex: 1,
+          minWidth: 240,
+        }}
+      >
+        {items.map((s) => (
+          <span
+            key={s}
+            className="chip active"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 12 }}
+          >
+            {s}
+            <button
+              type="button"
+              onClick={() => remove(s)}
+              aria-label={`${s} を削除`}
+              title="削除"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'inherit',
+                cursor: 'pointer',
+                padding: '0 2px',
+                fontSize: 13,
+                lineHeight: 1,
+              }}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
+            if (e.key === 'Enter' || e.key === ',' || e.key === '、') {
+              e.preventDefault();
+              commitDraft();
+            } else if (e.key === 'Backspace' && draft.length === 0 && items.length > 0) {
+              // 空欄で Backspace → 最後の chip を削除
+              e.preventDefault();
+              onChange(items.slice(0, -1).join('\n'));
+            }
+          }}
+          onBlur={commitDraft}
+          placeholder={items.length === 0 ? '例: Q  →Enter で確定' : '+ 追加'}
+          style={{
+            border: 'none',
+            outline: 'none',
+            background: 'transparent',
+            flex: 1,
+            minWidth: 80,
+            fontSize: 12,
+          }}
+        />
+      </div>
     </div>
   );
 }

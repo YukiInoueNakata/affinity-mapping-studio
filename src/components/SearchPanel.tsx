@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import { buildSearchIndex, type SearchHit, type SearchHitKind } from '../domain/search.js';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 
 interface Props {
   onJumpTo(hit: SearchHit): void;
@@ -38,8 +39,65 @@ export function SearchPanel({ onJumpTo }: Props) {
   const project = useProjectStore((s) => s.project);
   const selectedParticipantId = useProjectStore((s) => s.selectedParticipantId);
   const selectCard = useProjectStore((s) => s.selectCard);
+  const selectGroup = useProjectStore((s) => s.selectGroup);
   const [query, setQuery] = useState<string>('');
   const [scopeFilter, setScopeFilter] = useState<'all' | SearchHitKind>('all');
+  // 2026-06-02: 右クリックでコンテキストメニューを表示
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    hit: SearchHit;
+  } | null>(null);
+
+  const closeContextMenu = () => setContextMenu(null);
+
+  const buildContextMenuItems = (h: SearchHit): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [];
+    if (h.kind === 'card') {
+      items.push({
+        label: 'ジャンプ (カードへ)',
+        title: 'カードを選択してキャンバスへ移動',
+        onClick: () => {
+          selectCard(h.refId);
+          dispatchJumpToCard(h.refId);
+        },
+      });
+      items.push({
+        label: '選択のみ',
+        title: 'ジャンプせず選択だけ',
+        onClick: () => selectCard(h.refId),
+      });
+    } else if (h.kind === 'group') {
+      items.push({
+        label: 'ジャンプ (グループへ)',
+        title: 'グループを選択してキャンバスへ移動',
+        onClick: () => {
+          selectGroup(h.refId);
+          dispatchJumpToGroup(h.refId);
+        },
+      });
+      items.push({
+        label: '選択のみ',
+        onClick: () => selectGroup(h.refId),
+      });
+    } else if (h.kind === 'label' && h.groupId) {
+      items.push({
+        label: 'ジャンプ (グループへ)',
+        title: '表札の所属グループへ移動',
+        onClick: () => {
+          selectGroup(h.groupId!);
+          dispatchJumpToGroup(h.groupId!);
+        },
+      });
+    } else if (h.kind === 'segment') {
+      items.push({
+        label: 'ジャンプ (原文へ)',
+        title: '原文ビューアで表示',
+        onClick: () => onJumpTo(h),
+      });
+    }
+    return items;
+  };
 
   const index = useMemo(() => {
     if (!project) return null;
@@ -104,19 +162,9 @@ export function SearchPanel({ onJumpTo }: Props) {
                     onClick={() => onJumpTo(h)}
                     onContextMenu={(e) => {
                       e.preventDefault();
-                      if (h.kind === 'card') {
-                        selectCard(h.refId);
-                        dispatchJumpToCard(h.refId);
-                      } else if (h.kind === 'group') {
-                        dispatchJumpToGroup(h.refId);
-                      } else if (h.kind === 'label' && h.groupId) {
-                        // label の refId は label.id なので，groupId を使う
-                        dispatchJumpToGroup(h.groupId);
-                      } else {
-                        onJumpTo(h);
-                      }
+                      setContextMenu({ x: e.clientX, y: e.clientY, hit: h });
                     }}
-                    title="左クリック: 移動 / 右クリック: 選択して移動"
+                    title="左クリック: 移動 / 右クリック: メニュー"
                   >
                     <div className="search-result-head">
                       <span className={`kind-tag kind-${h.kind}`}>{KIND_LABEL[h.kind]}</span>
@@ -131,6 +179,14 @@ export function SearchPanel({ onJumpTo }: Props) {
             )}
           </div>
         </>
+      )}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={buildContextMenuItems(contextMenu.hit)}
+          onClose={closeContextMenu}
+        />
       )}
     </section>
   );

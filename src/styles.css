@@ -604,15 +604,19 @@ textarea {
   max-height: none;
 }
 
-/* Keep the heading visible while scrolling the list */
+/* Keep the heading visible while scrolling the list.
+ * 2026-06-02 改修: sticky h3 が section の padding 領域 (8px) を覆っていなくて
+ * スクロール中に list 内容が h3 の上にチラ見えしていた問題に対応．
+ * 負の margin で section の縁まで h3 の background を延ばし，padding と top を
+ * 調整して完全に塞ぐ． */
 .panel-section:not(.panel-section-grow):not(.search-section) h3 {
   position: sticky;
-  top: 0;
+  top: -8px;
   background: var(--bg-elev);
-  margin-top: 0;
-  padding-top: 2px;
-  padding-bottom: 4px;
-  z-index: 1;
+  margin: -8px -10px 4px;
+  padding: 10px 10px 6px;
+  border-bottom: 1px solid var(--border);
+  z-index: 2;
 }
 
 /* Subtle bottom border hint that the section is user-resizable */
@@ -685,12 +689,12 @@ textarea {
 
 .panel-section.search-section h3 {
   position: sticky;
-  top: 0;
+  top: -8px;
   background: var(--bg-elev);
-  margin-top: 0;
-  padding-top: 2px;
-  padding-bottom: 4px;
-  z-index: 1;
+  margin: -8px -10px 4px;
+  padding: 10px 10px 6px;
+  border-bottom: 1px solid var(--border);
+  z-index: 2;
 }
 
 .panel-section-grow {
@@ -713,12 +717,12 @@ textarea {
 
 .panel-section-grow h3 {
   position: sticky;
-  top: 0;
+  top: -8px;
   background: var(--bg-elev);
-  margin-top: 0;
-  padding-top: 2px;
-  padding-bottom: 4px;
-  z-index: 1;
+  margin: -8px -10px 4px;
+  padding: 10px 10px 6px;
+  border-bottom: 1px solid var(--border);
+  z-index: 2;
 }
 
 .panel-section h3 {
@@ -1444,6 +1448,108 @@ textarea {
   margin-bottom: 6px;
   cursor: grab;
   font-size: 11px;
+}
+
+/* 2026-06-02: キャンバスモード (移動 / 範囲選択) のトグル */
+.kj-canvas-mode-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-elev, #20242c);
+  border: 1px solid var(--border, #3a3f47);
+  border-radius: 4px;
+  padding: 2px;
+  font-size: 10px;
+}
+.kj-canvas-mode-toggle button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #6a7280);
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  text-align: left;
+  font-family: inherit;
+  font-size: inherit;
+}
+.kj-canvas-mode-toggle button:hover {
+  background: var(--bg-elev-2, rgba(255,255,255,0.05));
+  color: var(--text, #d8dee9);
+}
+.kj-canvas-mode-toggle button.active {
+  background: var(--accent, #5a90c8);
+  color: #fff;
+}
+
+/* 2026-06-02: 左ペインの目アイコン (キャンバス表示・非表示トグル) */
+.kj-vis-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-muted, #6a7280);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.kj-vis-toggle.shown {
+  color: var(--accent, #5a90c8);
+}
+.kj-vis-toggle.hidden {
+  color: var(--danger, #c33);
+  background: rgba(204, 51, 51, 0.1);
+}
+.kj-vis-toggle:hover {
+  border-color: var(--border, #3a3f47);
+  background: var(--bg-elev-2, rgba(255,255,255,0.05));
+}
+.kj-vis-hidden {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+/* 2026-06-02: 検索結果・階層表示などの右クリック用コンテキストメニュー */
+.kj-context-menu {
+  min-width: 160px;
+  background: var(--bg-elev, #20242c);
+  border: 1px solid var(--border, #3a3f47);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  padding: 4px 0;
+  font-size: 12px;
+  user-select: none;
+}
+.kj-context-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 6px 12px;
+  color: var(--text, #d8dee9);
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+}
+.kj-context-menu-item:hover:not(:disabled) {
+  background: var(--accent, #5a90c8);
+  color: #fff;
+}
+.kj-context-menu-item:disabled {
+  color: var(--text-muted, #6a7280);
+  cursor: default;
+}
+.kj-context-menu-divider {
+  height: 1px;
+  background: var(--border, #3a3f47);
+  margin: 4px 0;
 }
 
 /* 2026-06-02: ジャンプ時にカードを一瞬強調するアニメーション */

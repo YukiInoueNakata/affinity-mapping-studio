@@ -114,6 +114,24 @@ function CanvasViewImpl() {
     };
   }, [screenToFlowPosition]);
 
+  // 2026-06-02: カード整列でカード同士が被る問題対応．React Flow の実測サイズを
+  // App.tsx の整列処理から参照できるよう公開する．カード ID (data.id) で引ける．
+  useEffect(() => {
+    const w = window as unknown as {
+      __kjGetNodeSize?: (id: string) => { width: number; height: number } | null;
+    };
+    w.__kjGetNodeSize = (id: string) => {
+      // ReactFlow renders nodes as elements with data-id attribute
+      const el = document.querySelector(`.react-flow__node[data-id="${id}"]`) as HTMLElement | null;
+      if (!el) return null;
+      // offsetWidth/Height = ReactFlow に表示される実サイズ (zoom 影響なし)
+      return { width: el.offsetWidth, height: el.offsetHeight };
+    };
+    return () => {
+      delete w.__kjGetNodeSize;
+    };
+  }, []);
+
   // (#6) 階層表示などから「キャンバスでこのカードを表示」: ビューを移動 + 選択.
   useEffect(() => {
     const handler = (ev: Event) => {
@@ -158,6 +176,13 @@ function CanvasViewImpl() {
   const selectedCardIds = useProjectStore((s) => s.selectedCardIds);
   const selectedGroupId = useProjectStore((s) => s.selectedGroupId);
   const selectedGroupIds = useProjectStore((s) => s.selectedGroupIds);
+  // 2026-06-02: 表示・非表示フィルタ (左ペインで目アイコンで toggle)
+  const hiddenParticipantIds = useProjectStore((s) => s.hiddenParticipantIds);
+  const hiddenGroupIds = useProjectStore((s) => s.hiddenGroupIds);
+  const hiddenTags = useProjectStore((s) => s.hiddenTags);
+  // 2026-06-02: キャンバスモード (pan / select)
+  const canvasMode = useProjectStore((s) => s.canvasInteractionMode);
+  const setCanvasMode = useProjectStore((s) => s.setCanvasInteractionMode);
   const selectCard = useProjectStore((s) => s.selectCard);
   const selectCardIds = useProjectStore((s) => s.selectCardIds);
   const selectGroup = useProjectStore((s) => s.selectGroup);
@@ -227,8 +252,20 @@ function CanvasViewImpl() {
 
       const groupSelectedSet = new Set(selectedGroupIds);
       const hiddenIds = getHiddenIds(project.data);
+      // 2026-06-02: 表示フィルタを適用するための補助 set
+      const hiddenPartSet = new Set(hiddenParticipantIds);
+      const hiddenGroupSet = new Set(hiddenGroupIds);
+      const hiddenTagSet = new Set(hiddenTags);
+      // 非表示グループに属するカードもキャンバスから隠す
+      const cardsHiddenByGroup = new Set<string>();
+      if (hiddenGroupSet.size > 0) {
+        for (const m of project.data.group_memberships) {
+          if (hiddenGroupSet.has(m.groupId)) cardsHiddenByGroup.add(m.cardId);
+        }
+      }
       const groupNodes: Node<GroupNodeData>[] = project.data.groups
         .filter((g) => !hiddenIds.has(g.id))
+        .filter((g) => !hiddenGroupSet.has(g.id))
         .map((g) => {
         const pos = project.data.group_positions.find((p) => p.groupId === g.id);
         const live = draggingRef.current.has(g.id) ? currentPosMap.get(g.id) : undefined;
@@ -269,6 +306,11 @@ function CanvasViewImpl() {
 
       const cardNodes: Node<CardNodeData>[] = project.data.cards
         .filter((c) => !hiddenIds.has(c.id) && effectivePlacement(c) === 'canvas')
+        .filter((c) => !hiddenPartSet.has(c.participantId))
+        .filter((c) => !cardsHiddenByGroup.has(c.id))
+        .filter(
+          (c) => hiddenTagSet.size === 0 || !(c.tags ?? []).some((t) => hiddenTagSet.has(t))
+        )
         .map((c) => {
         const storedPos = posMap.get(c.id);
         const livePos = draggingRef.current.has(c.id) ? currentPosMap.get(c.id) : undefined;
@@ -308,7 +350,17 @@ function CanvasViewImpl() {
 
       return [...groupNodes, ...cardNodes];
     });
-  }, [project, selectedCardId, selectedCardIds, selectedGroupId, selectedGroupIds, setNodes]);
+  }, [
+    project,
+    selectedCardId,
+    selectedCardIds,
+    selectedGroupId,
+    selectedGroupIds,
+    setNodes,
+    hiddenParticipantIds,
+    hiddenGroupIds,
+    hiddenTags,
+  ]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -1335,8 +1387,13 @@ function CanvasViewImpl() {
             onEdgeClick={onEdgeClick}
             fitView={false}
             proOptions={{ hideAttribution: true }}
-            selectionOnDrag
-            multiSelectionKeyCode={['Shift']}
+            /* 2026-06-02: pan / select モード切替．
+             * pan: panOnDrag=true / selectionOnDrag=false → ドラッグで視点移動
+             * select: panOnDrag=false / selectionOnDrag=true → ドラッグで範囲選択 */
+            panOnDrag={canvasMode === 'pan'}
+            selectionOnDrag={canvasMode === 'select'}
+            /* Shift と Ctrl/Cmd の両方で複数選択できるように (ユーザー要望) */
+            multiSelectionKeyCode={['Shift', 'Control', 'Meta']}
             elevateNodesOnSelect={false}
             /* Performance: only render nodes whose bounding box overlaps the
              * current viewport.  Big difference on 500+ card projects. */
@@ -1348,6 +1405,29 @@ function CanvasViewImpl() {
             {/* MiniMap re-renders all nodes as SVG dots; for very large
              * projects we hide it to keep pan/zoom smooth. */}
             {nodes.length <= 300 && <MiniMap pannable zoomable />}
+            {/* 2026-06-02: キャンバスモード切替 (pan / select)．
+             * ReactFlow の Controls の上に重ねて表示 (左下) */}
+            <div
+              className="kj-canvas-mode-toggle"
+              style={{ position: 'absolute', bottom: 130, left: 8, zIndex: 5 }}
+            >
+              <button
+                type="button"
+                className={canvasMode === 'pan' ? 'active' : ''}
+                onClick={() => setCanvasMode('pan')}
+                title="移動モード: キャンバスをドラッグで視点移動．ノードクリックで個別選択"
+              >
+                ✥ 移動
+              </button>
+              <button
+                type="button"
+                className={canvasMode === 'select' ? 'active' : ''}
+                onClick={() => setCanvasMode('select')}
+                title="範囲選択モード: キャンバスをドラッグで矩形範囲選択"
+              >
+                □ 範囲
+              </button>
+            </div>
           </ReactFlow>
         </div>
       </div>

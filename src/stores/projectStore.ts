@@ -61,6 +61,24 @@ export interface ProjectStoreState {
   past: DomainCommand[];
   future: DomainCommand[];
 
+  /** 2026-06-02: キャンバス表示フィルタ (runtime, persist しない)．
+   *  対象の participantId / groupId / tag に該当するカード/グループは canvas
+   *  ノードから除外される．左ペインの一覧で目アイコンクリックでトグル． */
+  hiddenParticipantIds: ReadonlyArray<string>;
+  hiddenGroupIds: ReadonlyArray<string>;
+  hiddenTags: ReadonlyArray<string>;
+  toggleParticipantVisible(id: string): void;
+  toggleGroupVisible(id: string): void;
+  toggleTagVisible(tag: string): void;
+  resetVisibility(): void;
+
+  /** 2026-06-02: キャンバスの操作モード (runtime, persist しない)．
+   *  - 'pan': キャンバスドラッグで視点移動 (ノードクリックで個別選択)
+   *  - 'select': キャンバスドラッグで矩形範囲選択
+   *  リボン or キャンバス左下のトグルで切替． */
+  canvasInteractionMode: 'pan' | 'select';
+  setCanvasInteractionMode(mode: 'pan' | 'select'): void;
+
   loadProject(filePath: string | null, project: ProjectFile): void;
   closeProject(): void;
   markSaved(filePath: string, updatedAt: string): void;
@@ -136,6 +154,39 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   isDirty: false,
   past: [],
   future: [],
+  hiddenParticipantIds: [],
+  hiddenGroupIds: [],
+  hiddenTags: [],
+
+  toggleParticipantVisible(id) {
+    set((s) => {
+      const set0 = new Set(s.hiddenParticipantIds);
+      if (set0.has(id)) set0.delete(id); else set0.add(id);
+      return { hiddenParticipantIds: Array.from(set0) };
+    });
+  },
+  toggleGroupVisible(id) {
+    set((s) => {
+      const set0 = new Set(s.hiddenGroupIds);
+      if (set0.has(id)) set0.delete(id); else set0.add(id);
+      return { hiddenGroupIds: Array.from(set0) };
+    });
+  },
+  toggleTagVisible(tag) {
+    set((s) => {
+      const set0 = new Set(s.hiddenTags);
+      if (set0.has(tag)) set0.delete(tag); else set0.add(tag);
+      return { hiddenTags: Array.from(set0) };
+    });
+  },
+  resetVisibility() {
+    set({ hiddenParticipantIds: [], hiddenGroupIds: [], hiddenTags: [] });
+  },
+
+  canvasInteractionMode: 'select',
+  setCanvasInteractionMode(mode) {
+    set({ canvasInteractionMode: mode });
+  },
 
   loadProject(filePath, project) {
     set({

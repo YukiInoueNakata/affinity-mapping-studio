@@ -623,15 +623,21 @@ textarea {
 }
 
 /* (#9) 右ペイン (カード詳細) の各セクションは高さ手動調整を無効化.
- * カード詳細 / 原文参照 の間のリサイズハンドルは不要との要望. 自然な高さ +
- * 必要時スクロールに任せる.
- * 2026-06-02: 「下に余裕があるのに幅で隠れる」問題に対応．max-height を解除し，
- * 全要素が縦に並んで全て表示されるようにする．横方向で溢れる場合は wrap で対応． */
+ * 2026-06-02 改訂版:
+ *  - 既定で全て表示 (height: auto)
+ *  - そのセクションの内容が縦に長すぎる場合だけ「そのセクション内」で
+ *    スクロールバーを出す (max-height: 50vh + overflow-y: auto)
+ *  - 横方向は word-break で折り返して隠れないようにする
+ *  - セクション間の手動リサイズは無効
+ * → 「カード詳細ペイン」と「原文参照ペイン」がそれぞれ独立したスクロール領域に */
 .right-panel .panel-section {
   resize: none;
   height: auto;
-  max-height: none;
-  overflow: visible;
+  max-height: 50vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* スクロールバー領域を予約 (出ない時も右端が動かない) */
+  scrollbar-gutter: stable;
 }
 
 /* セクション内のテキスト・ラベル類は必ず折り返し */
@@ -639,6 +645,26 @@ textarea {
 .right-panel .panel-section * {
   word-break: break-word;
   overflow-wrap: anywhere;
+}
+
+/* WebKit (Tauri WebView2) でセクション内スクロールバーを淡くカスタム描画 */
+.right-panel .panel-section::-webkit-scrollbar {
+  width: 10px;
+}
+.right-panel .panel-section::-webkit-scrollbar-track {
+  background-color: rgba(42, 47, 56, 0.6);
+}
+.right-panel .panel-section::-webkit-scrollbar-thumb {
+  background-color: #6a7280;
+  border: 2px solid rgba(42, 47, 56, 0.6);
+  border-radius: 5px;
+  min-height: 24px;
+}
+.right-panel .panel-section::-webkit-scrollbar-thumb:hover {
+  background-color: #8a93a3;
+}
+.right-panel .panel-section::-webkit-scrollbar-button {
+  display: none;
 }
 
 /* Search section: also section-level scroll + resize so its scrollbar

@@ -256,11 +256,11 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   applyCommand(command) {
     const { project, past } = get();
     if (!project) return;
-    // Sec-003/009 viewer gate (2026-06-03): viewer ロールでは編集系コマンドを block．
-    // 現状は applyCommand 経由のすべての変更を block (= 完全 read-only)．
-    // 将来 (Phase 2B) コメント・メモログ系コマンドに viewerAllowed=true フラグを付けて
-    // 個別解放する設計に拡張予定．サーバー側 audit にも viewer-write として残る．
-    if (_editGateRole === 'viewer') {
+    // Sec-003/009 viewer gate (2026-06-03):
+    // viewer ロールでは command.viewerAllowed=true のコマンドだけ通す．
+    // Phase 2B: コメント / メモログ追記 (makeAddCardMemoEntryCommand /
+    // makeAddLabelMemoEntryCommand) は viewer も実行可．他はすべて block．
+    if (_editGateRole === 'viewer' && !command.viewerAllowed) {
       console.warn('[viewer-gate] blocked applyCommand:', command.label);
       if (!_viewerNoticeShown) {
         _viewerNoticeShown = true;
@@ -271,7 +271,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
               '閲覧者モード (viewer) です．\n\n' +
                 'このルームでは編集権限が付与されていません．\n' +
                 'カード・グループ・関係エッジ・整列などの編集操作は無効化されています．\n' +
-                'コメント・メモログ機能は今後のバージョンで viewer でも書き込み可能になる予定です．'
+                'カードや表札への「メモ追記」(コメント) は viewer でも実行可能です．'
             );
           }, 0);
         }

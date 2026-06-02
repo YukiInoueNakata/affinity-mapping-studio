@@ -3,10 +3,15 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useProjectStore, setEditGateRole, getEditGateRole } from '../../stores/projectStore.js';
-import { makeAddParticipantCommand } from '../../stores/commands.js';
+import {
+  makeAddParticipantCommand,
+  makeAddCardMemoEntryCommand,
+  makeAddLabelMemoEntryCommand,
+  makeDeleteCardMemoEntryCommand,
+} from '../../stores/commands.js';
 import { newId } from '../../domain/ids.js';
 import { makeEmptyProject } from '@shared/types/project';
-import type { Participant } from '@shared/types/domain';
+import type { Card, Label, MemoEntry, Participant } from '@shared/types/domain';
 
 const NOW = '2026-06-03T00:00:00.000Z';
 
@@ -104,5 +109,85 @@ describe('viewer edit gate (Sec-003/009)', () => {
 
     useProjectStore.getState().applyCommand(makeAddParticipantCommand(makeParticipant('P01')));
     expect(useProjectStore.getState().project?.data.participants).toHaveLength(1);
+  });
+
+  // ---- Phase 2B: viewerAllowed コマンドの個別解放 ----
+
+  function seedWithCardAndLabel(): { card: Card; label: Label } {
+    const project = makeEmptyProject('test', 'proj-' + newId(), NOW);
+    const card: Card = {
+      id: 'c1',
+      participantId: 'p1',
+      code: 'P01-001',
+      serialNumber: 1,
+      body: 'テスト本文',
+      status: 'active',
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const label: Label = {
+      id: 'l1',
+      groupId: 'g1',
+      text: '表札',
+      sharedMemo: '',
+      basisMemo: '',
+      holdMemo: '',
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    project.data.cards = [card];
+    project.data.labels = [label];
+    useProjectStore.getState().loadProject(null, project);
+    return { card, label };
+  }
+
+  it('Phase 2B: viewer はカードメモ追記 (viewerAllowed: true) を実行できる', () => {
+    const { card } = seedWithCardAndLabel();
+    setEditGateRole('viewer');
+
+    const entry: MemoEntry = { id: 'm1', text: '気になった点', timestamp: NOW };
+    const cmd = makeAddCardMemoEntryCommand(card.id, entry, NOW, card.updatedAt);
+    expect(cmd.viewerAllowed).toBe(true);
+
+    useProjectStore.getState().applyCommand(cmd);
+    const updated = useProjectStore.getState().project?.data.cards[0];
+    expect(updated?.memoLog).toEqual([entry]);
+  });
+
+  it('Phase 2B: viewer は表札メモ追記 (viewerAllowed: true) を実行できる', () => {
+    const { label } = seedWithCardAndLabel();
+    setEditGateRole('viewer');
+
+    const entry: MemoEntry = { id: 'm2', text: '叙述コメント', timestamp: NOW };
+    const cmd = makeAddLabelMemoEntryCommand(label.id, 'sharedMemo', entry, NOW, label.updatedAt);
+    expect(cmd.viewerAllowed).toBe(true);
+
+    useProjectStore.getState().applyCommand(cmd);
+    const updated = useProjectStore.getState().project?.data.labels[0];
+    expect(updated?.memoLogs?.sharedMemo).toEqual([entry]);
+  });
+
+  it('Phase 2B: viewer のメモ削除は viewerAllowed=false なので block される', () => {
+    const { card } = seedWithCardAndLabel();
+    // 先に editor として 1 件追記
+    setEditGateRole('editor');
+    const entry: MemoEntry = { id: 'm3', text: '初期メモ', timestamp: NOW };
+    useProjectStore.getState().applyCommand(
+      makeAddCardMemoEntryCommand(card.id, entry, NOW, card.updatedAt)
+    );
+    expect(useProjectStore.getState().project?.data.cards[0]?.memoLog).toHaveLength(1);
+
+    // viewer に降格して削除を試みる → block
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    if (typeof globalThis !== 'undefined') {
+      (globalThis as unknown as { alert?: (msg?: string) => void }).alert = vi.fn();
+    }
+    setEditGateRole('viewer');
+    const deleteCmd = makeDeleteCardMemoEntryCommand(card.id, entry, NOW, NOW);
+    expect(deleteCmd.viewerAllowed).toBeUndefined();
+    useProjectStore.getState().applyCommand(deleteCmd);
+    expect(useProjectStore.getState().project?.data.cards[0]?.memoLog).toHaveLength(1);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });

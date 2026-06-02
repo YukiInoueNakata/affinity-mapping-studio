@@ -33,6 +33,12 @@ export interface DomainCommand {
   readonly label: string;
   apply(data: ProjectData): ProjectData;
   revert(data: ProjectData): ProjectData;
+  /** Sec-003/009 Phase 2B (2026-06-03): viewer ロールでも実行を許可するコマンド．
+   *  既定 (undefined / false) は editor 以上専用．
+   *  true を付けるのは「コメント」「メモログ追記」など，他者の編集を破壊しない
+   *  append-only な書き込みに限定する．Edit / Delete はオーナーシップ判定が
+   *  ないため安全側に倒して false のまま． */
+  readonly viewerAllowed?: boolean;
 }
 
 export function makeAddParticipantCommand(participant: Participant): DomainCommand {
@@ -1841,6 +1847,8 @@ export function makeAddCardMemoEntryCommand(
 ): DomainCommand {
   return {
     label: `カードメモ追記: ${cardId}`,
+    // Sec-003/009 Phase 2B: viewer も append-only でカードコメント可
+    viewerAllowed: true,
     apply: (d) => ({
       ...d,
       cards: d.cards.map((c) =>
@@ -1916,6 +1924,8 @@ export function makeAddLabelMemoEntryCommand(
 ): DomainCommand {
   return {
     label: `表札メモ追記: ${labelId}/${field}`,
+    // Sec-003/009 Phase 2B: viewer も append-only で表札 (グループラベル) コメント可
+    viewerAllowed: true,
     apply: (d) => ({
       ...d,
       labels: d.labels.map((l) =>

@@ -1073,6 +1073,27 @@ export function App() {
             </button>
           )}
           {__INCLUDE_SYNC__ && <SyncStatusBadge onOpenConnect={() => setSyncDialogOpen(true)} />}
+          {/* 2026-06-02 デバッグオーバーレイ: dev tools が開けない環境向け．store 状態を常時表示． */}
+          <div
+            style={{
+              position: 'fixed',
+              bottom: 6,
+              right: 6,
+              fontSize: 10,
+              padding: '4px 8px',
+              background: 'rgba(0,0,0,0.7)',
+              color: '#9efc7e',
+              fontFamily: 'monospace',
+              borderRadius: 4,
+              zIndex: 9999,
+              pointerEvents: 'none',
+            }}
+          >
+            cards={project?.data.cards.length ?? '-'}
+            {' '}segs={project?.data.source_segments.length ?? '-'}
+            {' '}groups={project?.data.groups.length ?? '-'}
+            {' '}sync={syncSnapshot.status}{syncSnapshot.synced ? '✓' : ''}
+          </div>
           {/* 分析モード切替 (KJ / M-GTA / GTA) は当面 KJ のみのため UI 上は非表示．
               データ構造・型 (AppMode) は温存しており，将来再有効化可能． */}
         </div>

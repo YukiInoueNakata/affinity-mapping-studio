@@ -248,7 +248,16 @@ export class YjsWebsocketProvider {
     if (type === MESSAGE_SYNC) {
       const reply = encoding.createEncoder();
       encoding.writeVarUint(reply, MESSAGE_SYNC);
+      const beforeCards = (this.opts.doc.getMap('tables').get('cards') as { length?: number } | undefined)?.length ?? 0;
       const msgType = syncProtocol.readSyncMessage(dec, reply, this.opts.doc, this);
+      const afterCards = (this.opts.doc.getMap('tables').get('cards') as { length?: number } | undefined)?.length ?? 0;
+      // 2026-06-02 debug ログ
+      console.info('[provider.msg] sync', {
+        subType: msgType,
+        bytes,
+        cardsBefore: beforeCards,
+        cardsAfter: afterCards,
+      });
       if (encoding.length(reply) > 1) {
         this.send(encoding.toUint8Array(reply));
       }

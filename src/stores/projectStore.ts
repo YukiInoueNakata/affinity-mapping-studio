@@ -421,12 +421,23 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     // into mirrorToBridge.
     _unsubscribeRemote = bridge.observe((remoteData) => {
       const { project: cur } = get();
+      // 2026-06-02 incident デバッグ用ログ．v0.2.8 で原因を絞り込む用．
+      console.info('[sync.observe] remote data received', {
+        hasCur: !!cur,
+        curCards: cur?.data.cards.length ?? null,
+        remoteCards: remoteData.cards.length,
+        remoteSegments: remoteData.source_segments.length,
+        remoteGroups: remoteData.groups.length,
+      });
       _applyingRemote = true;
       try {
         if (cur) {
           set({
             project: withData(cur, remoteData),
             isDirty: true,
+          });
+          console.info('[sync.observe] store updated (cur branch)', {
+            cards: get().project?.data.cards.length,
           });
         } else {
           // 2026-06-02 incident 修正: 旧コードは cur=null 時に remoteData を破棄して
@@ -447,6 +458,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
               data: remoteData,
             },
             isDirty: false,
+          });
+          console.info('[sync.observe] store updated (synth shell)', {
+            cards: get().project?.data.cards.length,
           });
         }
       } finally {
@@ -493,6 +507,12 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     }
   },
 }));
+
+// デバッグ用: dev tools から store の状態を確認できるよう window に露出．
+// 例: window.__kjStore.getState().project?.data.cards.length
+if (typeof window !== 'undefined') {
+  (window as unknown as { __kjStore: typeof useProjectStore }).__kjStore = useProjectStore;
+}
 
 // ---- Cross-window BroadcastChannel sync ----
 // When multiple Electron renderer windows are open (e.g. the SourceViewer pop-out),

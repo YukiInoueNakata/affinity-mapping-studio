@@ -122,9 +122,18 @@ class SyncManager {
     // ローカルプロジェクトをルームに転送したい場合は明示的に uploadProject() を
     // 呼ぶ運用とする．attachSyncBridge は seed=false で，hydrateFromBridge で
     // サーバー / IndexedDB からのデータをローカル store へ反映する．
+    // 2026-06-02 debug ログ
+    console.info('[sync.connect] pre-attach', {
+      roomId: opts.roomId,
+      hadCache,
+      currentProjectCards: useProjectStore.getState().project?.data.cards.length ?? null,
+    });
     useProjectStore.getState().attachSyncBridge(bridge, { seed: false });
     if (hadCache) {
+      console.info('[sync.connect] hadCache=true, hydrating from bridge');
       useProjectStore.getState().hydrateFromBridge(bridge);
+    } else {
+      console.info('[sync.connect] hadCache=false, waiting for server sync');
     }
 
     this.setState({

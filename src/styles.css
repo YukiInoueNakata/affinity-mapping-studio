@@ -1352,23 +1352,37 @@ textarea {
   overflow-y: scroll;
   scrollbar-gutter: stable;
   padding: 6px;
+  /* Firefox / 標準 scrollbar API．thumb=明色 / track=暗色． */
+  scrollbar-width: thin;
+  scrollbar-color: #8a93a3 #2a2f38;
 }
 
-/* WebKit (Tauri WebView) のスクロールバーを淡くカスタム描画して常時可視化． */
+/* WebKit (Tauri WebView2 / Chromium) 系のスクロールバーを常時可視．
+ * 既定の overlay scrollbar は色が薄く視認しづらいため，明示色で上書き． */
 .placement-list::-webkit-scrollbar {
-  width: 10px;
+  width: 12px;
+  background-color: #2a2f38;
 }
 .placement-list::-webkit-scrollbar-track {
-  background: var(--bg-elev-2, #1e2229);
-  border-radius: 5px;
+  background-color: #2a2f38;
+  border-radius: 0;
 }
 .placement-list::-webkit-scrollbar-thumb {
-  background: var(--border, #3a3f47);
-  border-radius: 5px;
-  min-height: 24px;
+  /* 暗背景でもはっきり見える灰色．border でトラックとの境界を出す． */
+  background-color: #8a93a3;
+  border: 2px solid #2a2f38;
+  border-radius: 6px;
+  min-height: 30px;
 }
 .placement-list::-webkit-scrollbar-thumb:hover {
-  background: var(--accent, #5a90c8);
+  background-color: #b3bccb;
+}
+.placement-list::-webkit-scrollbar-thumb:active {
+  background-color: #d0d6e0;
+}
+/* 端の矢印ボタンは描画しない（薄暗いまま残るとノイズになるため） */
+.placement-list::-webkit-scrollbar-button {
+  display: none;
 }
 
 .placement-card {

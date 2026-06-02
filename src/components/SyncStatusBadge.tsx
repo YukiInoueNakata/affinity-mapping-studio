@@ -24,10 +24,24 @@ const STATUS_LABEL: Record<string, string> = {
   'auth-denied': '認証拒否',
 };
 
+const ROLE_BADGE_COLOR: Record<string, string> = {
+  viewer: '#8a6d3b',
+  editor: '#3a7',
+  admin: '#a73a8a',
+};
+
+const ROLE_BADGE_LABEL: Record<string, string> = {
+  viewer: '閲覧者モード',
+  editor: '編集者',
+  admin: '管理者',
+};
+
 export function SyncStatusBadge({ onOpenConnect }: Props) {
   const { state, disconnect } = useSyncManager();
   const isConnected = state.status === 'connected' && state.synced;
   const isActive = state.status !== 'idle';
+  const role = state.role?.role;
+  const showRoleBadge = isConnected && role && role !== 'editor'; // editor は既定なので非表示
 
   return (
     <div className="sync-status-area">
@@ -37,7 +51,8 @@ export function SyncStatusBadge({ onOpenConnect }: Props) {
         onClick={isConnected ? undefined : onOpenConnect}
         title={
           isConnected
-            ? `ルーム: ${state.meta?.roomId} / ${state.meta?.serverUrl}`
+            ? `ルーム: ${state.meta?.roomId} / ${state.meta?.serverUrl}` +
+              (role ? `\nロール: ${role}${state.role?.via ? ` (${state.role.via})` : ''}` : '')
             : 'サーバーに接続して共同編集'
         }
         style={{
@@ -55,6 +70,20 @@ export function SyncStatusBadge({ onOpenConnect }: Props) {
           )}
         </span>
       </button>
+
+      {showRoleBadge && (
+        <span
+          className="sync-role-badge"
+          style={{ background: ROLE_BADGE_COLOR[role] ?? '#888' }}
+          title={
+            role === 'viewer'
+              ? '閲覧専用．カード・グループは編集不可．コメントとメモログのみ書き込み可'
+              : `ロール: ${role}`
+          }
+        >
+          {ROLE_BADGE_LABEL[role] ?? role}
+        </span>
+      )}
 
       {state.peers.length > 0 && (
         <div className="sync-peers">

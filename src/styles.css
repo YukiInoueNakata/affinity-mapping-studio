@@ -3060,6 +3060,19 @@ mark.search-match {
   white-space: nowrap;
 }
 
+.sync-role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: help;
+}
+
 .sync-peers {
   display: inline-flex;
   align-items: center;

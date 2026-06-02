@@ -22,6 +22,25 @@ import * as decoding from 'lib0/decoding';
 
 const MESSAGE_SYNC = 0;
 const MESSAGE_AWARENESS = 1;
+// Sec-003/009 (2026-06-03): KJ Studio Server 独自メッセージ．接続確立直後に
+// サーバーから { kind: 'role-assigned', role, via, identity, strict, serverVersion }
+// が JSON で送られてくる．未対応サーバー (旧 kj-trace-server) からは届かないため
+// role は null のままで safe fallback (= editor 既定) で動作．
+const MESSAGE_KJ_META = 2;
+
+// Sec-008 (2026-06-03): WS subprotocol．サーバーは receive-only で問題なし．
+// 厳格モード (KJ_REQUIRE_KJ_STUDIO_PROTOCOL=true) のサーバーでもこの subprotocol で通過する．
+const KJ_STUDIO_SUBPROTOCOL = 'kj-studio.v1';
+
+export type KjRole = 'editor' | 'viewer' | 'admin';
+
+export interface KjRoleAssignment {
+  role: KjRole;
+  via?: string;
+  identity?: string;
+  strict?: boolean;
+  serverVersion?: string;
+}
 
 export type ProviderStatus =
   | 'idle'
@@ -54,7 +73,8 @@ export interface YjsWebsocketProviderOptions {
 export type ProviderEvent =
   | { type: 'status'; status: ProviderStatus; detail?: string }
   | { type: 'sync'; synced: boolean }
-  | { type: 'error'; error: Error };
+  | { type: 'error'; error: Error }
+  | { type: 'role-assigned'; assignment: KjRoleAssignment };
 
 export class YjsWebsocketProvider {
   readonly opts: Required<Pick<YjsWebsocketProviderOptions, 'serverUrl' | 'roomId' | 'doc'>> &
@@ -107,7 +127,9 @@ export class YjsWebsocketProvider {
     const url = this.buildUrl();
     let socket: WebSocket;
     try {
-      socket = new WebSocket(url);
+      // Sec-008: kj-studio.v1 subprotocol を offer．サーバー側が要求モードのとき
+      // 通過するために必要．non-strict サーバーでも害は無い．
+      socket = new WebSocket(url, [KJ_STUDIO_SUBPROTOCOL]);
     } catch (e) {
       this.emit({ type: 'error', error: e as Error });
       this.setStatus('error', (e as Error).message);
@@ -272,6 +294,35 @@ export class YjsWebsocketProvider {
         decoding.readVarUint8Array(dec),
         this
       );
+    } else if (type === MESSAGE_KJ_META) {
+      // Sec-003/009 (2026-06-03): サーバーからのメタ情報．現状は role-assigned のみ．
+      try {
+        const json = decoding.readVarString(dec);
+        const meta = JSON.parse(json) as {
+          kind?: string;
+          role?: KjRole;
+          via?: string;
+          identity?: string;
+          strict?: boolean;
+          serverVersion?: string;
+        };
+        if (meta.kind === 'role-assigned' && meta.role) {
+          this.emit({
+            type: 'role-assigned',
+            assignment: {
+              role: meta.role,
+              via: meta.via,
+              identity: meta.identity,
+              strict: meta.strict,
+              serverVersion: meta.serverVersion,
+            },
+          });
+        } else {
+          console.info('[provider] kj-meta:', meta);
+        }
+      } catch (e) {
+        console.warn('[provider] failed to parse kj-meta payload:', e);
+      }
     } else {
       console.warn('unknown ws message type:', type);
     }

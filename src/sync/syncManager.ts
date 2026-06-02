@@ -11,8 +11,10 @@ import { YjsSyncBridge } from './yjsBridge.js';
 import {
   YjsWebsocketProvider,
   type ProviderStatus,
+  type KjRole,
+  type KjRoleAssignment,
 } from './yWebsocketProvider.js';
-import { useProjectStore } from '../stores/projectStore.js';
+import { useProjectStore, setEditGateRole } from '../stores/projectStore.js';
 import type { ProjectFile } from '@shared/types/project';
 
 /** True if the Y.Doc's `tables` map already holds any records — i.e. data was
@@ -49,6 +51,9 @@ export interface SyncState {
   peers: PresenceUser[];
   /** Connection metadata for the UI to display. */
   meta: { serverUrl: string; roomId: string; nick: string; email: string } | null;
+  /** Sec-003/009: サーバーから通知されたロール．未接続 / 旧サーバー時は null．
+   *  null = role 未通知 (= editor 既定で safe fallback)． */
+  role: KjRoleAssignment | null;
 }
 
 const INITIAL_STATE: SyncState = {
@@ -57,6 +62,7 @@ const INITIAL_STATE: SyncState = {
   errorDetail: null,
   peers: [],
   meta: null,
+  role: null,
 };
 
 class SyncManager {
@@ -156,6 +162,11 @@ class SyncManager {
         this.setState({ synced: e.synced });
       } else if (e.type === 'error') {
         this.setState({ errorDetail: e.error.message });
+      } else if (e.type === 'role-assigned') {
+        console.info('[sync] role assigned by server:', e.assignment);
+        this.setState({ role: e.assignment });
+        // Sec-003/009: store 側の edit gate にも反映．viewer のとき applyCommand が block される．
+        setEditGateRole(e.assignment.role);
       }
     });
 
@@ -241,7 +252,12 @@ class SyncManager {
     }
     if (this.state.status !== 'idle') {
       this.setState(INITIAL_STATE);
+    } else if (this.state.role !== null) {
+      // 接続失敗で idle に戻った場合でも role 情報は持ち越さない
+      this.setState({ role: null });
     }
+    // Sec-003/009: 切断したら gate も解除．ローカル単独編集は常に editor 想定．
+    setEditGateRole(null);
   }
 
   // ---- internals ----

@@ -16,6 +16,22 @@ export function getSyncBridge(): YjsSyncBridge | null {
   return _syncBridge;
 }
 
+// Sec-003/009 (2026-06-03): viewer ロール時の edit gate．
+// sync 層 (syncManager) からプッシュされる．null = 制限なし (= editor 既定 safe fallback)．
+let _editGateRole: 'viewer' | 'editor' | 'admin' | null = null;
+let _viewerNoticeShown = false;
+
+/** sync 層から呼ぶ．未通知 / 旧サーバー時は null を渡す． */
+export function setEditGateRole(role: 'viewer' | 'editor' | 'admin' | null): void {
+  if (_editGateRole === role) return;
+  _editGateRole = role;
+  if (role !== 'viewer') _viewerNoticeShown = false;
+}
+
+export function getEditGateRole(): 'viewer' | 'editor' | 'admin' | null {
+  return _editGateRole;
+}
+
 /** True when applying a remote-originated update; suppresses re-mirroring. */
 let _applyingRemote = false;
 
@@ -240,6 +256,28 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   applyCommand(command) {
     const { project, past } = get();
     if (!project) return;
+    // Sec-003/009 viewer gate (2026-06-03): viewer ロールでは編集系コマンドを block．
+    // 現状は applyCommand 経由のすべての変更を block (= 完全 read-only)．
+    // 将来 (Phase 2B) コメント・メモログ系コマンドに viewerAllowed=true フラグを付けて
+    // 個別解放する設計に拡張予定．サーバー側 audit にも viewer-write として残る．
+    if (_editGateRole === 'viewer') {
+      console.warn('[viewer-gate] blocked applyCommand:', command.label);
+      if (!_viewerNoticeShown) {
+        _viewerNoticeShown = true;
+        // 1 セッションに 1 回だけ通知．以降は console のみ
+        if (typeof window !== 'undefined') {
+          setTimeout(() => {
+            window.alert(
+              '閲覧者モード (viewer) です．\n\n' +
+                'このルームでは編集権限が付与されていません．\n' +
+                'カード・グループ・関係エッジ・整列などの編集操作は無効化されています．\n' +
+                'コメント・メモログ機能は今後のバージョンで viewer でも書き込み可能になる予定です．'
+            );
+          }, 0);
+        }
+      }
+      return;
+    }
     const nextData = command.apply(project.data);
     const nextPast = [...past, command].slice(-MAX_HISTORY);
     set({

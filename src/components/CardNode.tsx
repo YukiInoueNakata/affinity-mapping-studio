@@ -5,6 +5,7 @@ import {
   makeEditCardBodyCommand,
   makeToggleCardCollapsedCommand,
 } from '../stores/commands.js';
+import { useIsViewer } from '../sync/useSyncManager.js';
 
 export interface CardNodeData {
   code: string;
@@ -27,6 +28,7 @@ export interface CardNodeData {
 function CardNodeImpl({ id, data, selected }: NodeProps<CardNodeData>) {
   const project = useProjectStore((s) => s.project);
   const applyCommand = useProjectStore((s) => s.applyCommand);
+  const isViewer = useIsViewer();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -40,6 +42,10 @@ function CardNodeImpl({ id, data, selected }: NodeProps<CardNodeData>) {
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    // Sec-003/009 Phase 2C: viewer のときはインライン編集を始めない．
+    // (applyCommand 入口でも block されるが，編集モードに入って「変更が保存されない」
+    //  という混乱を避けるため UI 側で早期 return)．
+    if (isViewer) return;
     setDraft(data.body);
     setEditing(true);
   };

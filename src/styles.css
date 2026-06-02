@@ -139,6 +139,65 @@ textarea {
   min-height: 80px;
 }
 
+/* Sec-003/009 Phase 2C (2026-06-03): viewer ロール時のグローバル視覚スタイル．
+ * body[data-kj-role="viewer"] の下で適用される．applyCommand 入口で block されるので
+ * クリックは block でき，UI 側は灰色化と「閲覧者モード」バナーで早期に伝える． */
+.viewer-mode-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: linear-gradient(90deg, #8a6d3b 0%, #6f5530 100%);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+  user-select: none;
+}
+
+.viewer-mode-banner-icon {
+  color: #ffd95a;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.viewer-mode-banner-text {
+  flex: 1;
+}
+
+/* 編集系リボンタブ (編集 / 整列 / 一括操作) のボタンを viewer 時に減透明化．
+ * 「ファイル」「表示」タブはそのまま (読み取り中心の操作はそのまま動作)．
+ * クリック自体は通すので applyCommand 入口の alert は引き続き発火する． */
+body[data-kj-role="viewer"] .ribbon-row-2[data-ribbon-tab="edit"] .rb-btn,
+body[data-kj-role="viewer"] .ribbon-row-2[data-ribbon-tab="edit"] .rb-btn-lg,
+body[data-kj-role="viewer"] .ribbon-row-2[data-ribbon-tab="edit"] .rb-btn-sm,
+body[data-kj-role="viewer"] .ribbon-row-2[data-ribbon-tab="align"] .rb-btn,
+body[data-kj-role="viewer"] .ribbon-row-2[data-ribbon-tab="align"] .rb-btn-lg,
+body[data-kj-role="viewer"] .ribbon-row-2[data-ribbon-tab="align"] .rb-btn-sm,
+body[data-kj-role="viewer"] .ribbon-row-2[data-ribbon-tab="bulk"] .rb-btn,
+body[data-kj-role="viewer"] .ribbon-row-2[data-ribbon-tab="bulk"] .rb-btn-lg,
+body[data-kj-role="viewer"] .ribbon-row-2[data-ribbon-tab="bulk"] .rb-btn-sm {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 「メモ追記」など viewer 許可ボタンには明示的に opt-in．現状は付与なし
+ * (Phase 2C では「整列・編集タブ全体を dim」の粒度で運用)． */
+body[data-kj-role="viewer"] .ribbon-row-2 [data-viewer-ok="1"] {
+  opacity: 1 !important;
+  cursor: pointer !important;
+}
+
+/* カード／グループのインライン編集 textarea を viewer のときは触れないようにする
+ * (本来は handleDoubleClick で start を block しているが多層防御として) */
+body[data-kj-role="viewer"] .card-body-input,
+body[data-kj-role="viewer"] .group-label-input {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
 .ribbon-section {
   display: flex;
   flex-direction: column;

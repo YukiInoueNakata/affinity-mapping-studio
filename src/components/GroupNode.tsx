@@ -9,6 +9,7 @@ import {
   type OnResizeStart,
 } from 'reactflow';
 import { useProjectStore } from '../stores/projectStore.js';
+import { useIsViewer } from '../sync/useSyncManager.js';
 import {
   makeEditLabelCommand,
   makeRenameGroupCommand,
@@ -95,8 +96,13 @@ function GroupNodeImpl({ id, data, selected }: NodeProps<GroupNodeData>) {
     setEditing(false);
   };
 
+  const isViewer = useIsViewer();
   const startEdit = () => {
     if (!project) return;
+    // Sec-003/009 Phase 2C: viewer は表札テキストを直接編集できない．
+    // (memoLogs への追記は applyCommand 側で許可されているため，
+    //  メモ系 UI からは引き続き操作可能)
+    if (isViewer) return;
     const group = project.data.groups.find((g) => g.id === id);
     if (!group) return;
     const label = project.data.labels.find((l) => l.groupId === id);

@@ -106,7 +106,17 @@ export function App() {
     syncManager.getState()
   );
   useEffect(() => syncManager.on(setSyncSnapshot), []);
+  // Sec-003/009 Phase 2C: body の data 属性に現在のロールを反映．CSS の
+  // `[data-kj-role="viewer"]` セレクタで広域的に視覚 disable を効かせる．
+  useEffect(() => {
+    const r = syncSnapshot.role?.role;
+    if (r) document.body.dataset.kjRole = r;
+    else delete document.body.dataset.kjRole;
+  }, [syncSnapshot.role?.role]);
   const inRoom = !!syncSnapshot.meta;
+  // Sec-003/009 Phase 2C: viewer ロールのときは UI 全体を「閲覧者モード」として扱う．
+  // 編集系操作は applyCommand 入口で block されるが，UX 上は事前に視覚で示す．
+  const isViewer = syncSnapshot.role?.role === 'viewer';
   const projectHasData =
     !!project &&
     (project.data.cards.length > 0 ||
@@ -1152,7 +1162,20 @@ export function App() {
           {/* 分析モード切替 (KJ / M-GTA / GTA) は当面 KJ のみのため UI 上は非表示．
               データ構造・型 (AppMode) は温存しており，将来再有効化可能． */}
         </div>
-        <div className="ribbon-row-2">
+        {isViewer && (
+          <div
+            className="viewer-mode-banner"
+            role="status"
+            title="サーバーから viewer ロールが付与されています．編集は無効化されています．"
+          >
+            <span className="viewer-mode-banner-icon" aria-hidden="true">●</span>
+            <span className="viewer-mode-banner-text">
+              閲覧者モード — カード・グループの編集は無効です．
+              カードと表札へのメモ追記 (コメント) は実行できます．
+            </span>
+          </div>
+        )}
+        <div className="ribbon-row-2" data-ribbon-tab={ribbonTab}>
           {ribbonTab === 'file' && (
             <>
               <RibbonSection label="ファイル">

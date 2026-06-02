@@ -699,8 +699,18 @@ export function SourceViewer() {
     );
     if (targets.length === 0) return;
     const targetIds = new Set(targets.map((s) => s.id));
+    // カスケード削除対象を先に確定: このファイルのセグメントを 1 つでも参照する
+    // カードは連鎖削除（リンク・配置・グループ所属も併せて消す．Undo で復元される）．
+    const cascadedCardIds = new Set(
+      data.card_source_links
+        .filter((l) => targetIds.has(l.segmentId))
+        .map((l) => l.cardId)
+    );
     // (#1) このファイルにセグメントを持つ参加者のうち，削除後に「残る active
-    // セグメント無し かつ カード無し」になる参加者を孤立として一緒に削除する.
+    // セグメント無し かつ 残るカード無し」になる参加者を孤立として一緒に削除する．
+    // 2026-06-02 修正: cascadedCardIds を除外していなかったため，カードが
+    // カスケード削除されるはずの参加者が「カードあり」として孤立判定から漏れて
+    // いた（→ 削除後も検索の参加者リストに残る問題）．
     const fileParticipantIds = new Set(targets.map((s) => s.participantId));
     const orphaned = data.participants.filter((p) => {
       if (!fileParticipantIds.has(p.id)) return false;
@@ -708,16 +718,12 @@ export function SourceViewer() {
         (s) => s.participantId === p.id && s.deletedAt === null && !targetIds.has(s.id)
       );
       if (hasOtherActiveSeg) return false;
-      const hasCards = data.cards.some((c) => c.participantId === p.id);
-      return !hasCards;
+      // カスケード削除されないカードが残るかどうか
+      const hasRemainingCards = data.cards.some(
+        (c) => c.participantId === p.id && !cascadedCardIds.has(c.id)
+      );
+      return !hasRemainingCards;
     });
-    // カスケード削除: このファイルのセグメントを 1 つでも参照しているカードは
-    // 連鎖削除（リンク・配置・グループ所属も併せて消す．Undo で復元される）．
-    const cascadedCardIds = new Set(
-      data.card_source_links
-        .filter((l) => targetIds.has(l.segmentId))
-        .map((l) => l.cardId)
-    );
     const cascadedCards = data.cards.filter((c) => cascadedCardIds.has(c.id));
     const cascadedLinks = data.card_source_links.filter((l) => cascadedCardIds.has(l.cardId));
     const cascadedPositions = data.card_positions.filter((p) => cascadedCardIds.has(p.cardId));

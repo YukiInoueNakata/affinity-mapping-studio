@@ -33,6 +33,10 @@ export interface ConnectOptions {
   roomId: string;
   email?: string;
   nick: string;
+  /** Sec-111 (2026-06-03): 招待 token．email より優先される． */
+  token?: string;
+  /** Sec-111: ルーム共通パスワード． */
+  password?: string;
 }
 
 export interface PresenceUser {
@@ -108,6 +112,8 @@ class SyncManager {
       roomId: opts.roomId,
       email: opts.email ?? '',
       nick: opts.nick,
+      token: opts.token,
+      password: opts.password,
       doc,
     });
     // Hand the awareness instance a small "user" payload so other peers see us

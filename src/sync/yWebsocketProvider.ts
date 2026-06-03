@@ -56,10 +56,14 @@ export interface YjsWebsocketProviderOptions {
   serverUrl: string;
   /** Room id (becomes the URL pathname). */
   roomId: string;
-  /** Optional email (required for invite_list rooms). */
+  /** Optional email (required for invite_list rooms when token not provided). */
   email?: string;
   /** Optional nickname (used in awareness presence). */
   nick?: string;
+  /** Sec-111 (2026-06-03): 招待 token．`?t=<token>` で送る．これが優先される． */
+  token?: string;
+  /** Sec-111: ルーム共通パスワード．`?pw=<password>` で送る． */
+  password?: string;
   /** Y.Doc to synchronise. */
   doc: Y.Doc;
   /** Awareness instance.  If not supplied, one is created from `doc`. */
@@ -212,6 +216,9 @@ export class YjsWebsocketProvider {
     const qs = new URLSearchParams();
     if (this.opts.email) qs.set('email', this.opts.email);
     if (this.opts.nick) qs.set('nick', this.opts.nick);
+    // Sec-111: token / password を URL query に乗せる (サーバーが ?t= / ?pw= で受ける)
+    if (this.opts.token) qs.set('t', this.opts.token);
+    if (this.opts.password) qs.set('pw', this.opts.password);
     const path = encodeURIComponent(this.opts.roomId).replace(/%2F/g, '/');
     const query = qs.toString();
     return query.length > 0 ? `${base}/${path}?${query}` : `${base}/${path}`;

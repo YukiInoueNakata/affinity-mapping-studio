@@ -26,7 +26,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "publisher": "Yuki Inoue Nakata",
     "category": "Productivity",
     "shortDescription": "KJ 法支援ソフト (個人版)",

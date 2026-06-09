@@ -40,6 +40,14 @@ export interface KjRoleAssignment {
   identity?: string;
   strict?: boolean;
   serverVersion?: string;
+  /** CA3 (2026-06-09): サーバーが「なぜこの role になったか」を伝える human-readable 文字列 */
+  matchedRule?: string;
+  /** CA2 (2026-06-09): legacy client 検出時にサーバーが添付する upgrade 推奨 banner */
+  upgradeRecommended?: {
+    reason: string;
+    message: string;
+    downloadHint?: string;
+  };
 }
 
 export type ProviderStatus =
@@ -311,7 +319,8 @@ export class YjsWebsocketProvider {
         this
       );
     } else if (type === MESSAGE_KJ_META) {
-      // Sec-003/009 (2026-06-03): サーバーからのメタ情報．現状は role-assigned のみ．
+      // Sec-003/009 (2026-06-03) / CA2+CA3 (2026-06-09):
+      // サーバーから { role, via, identity, strict, serverVersion, matchedRule?, upgradeRecommended? }
       try {
         const json = decoding.readVarString(dec);
         const meta = JSON.parse(json) as {
@@ -321,6 +330,12 @@ export class YjsWebsocketProvider {
           identity?: string;
           strict?: boolean;
           serverVersion?: string;
+          matchedRule?: string;
+          upgradeRecommended?: {
+            reason: string;
+            message: string;
+            downloadHint?: string;
+          };
         };
         if (meta.kind === 'role-assigned' && meta.role) {
           this.emit({
@@ -331,6 +346,8 @@ export class YjsWebsocketProvider {
               identity: meta.identity,
               strict: meta.strict,
               serverVersion: meta.serverVersion,
+              matchedRule: meta.matchedRule,             // CA3
+              upgradeRecommended: meta.upgradeRecommended, // CA2
             },
           });
         } else {

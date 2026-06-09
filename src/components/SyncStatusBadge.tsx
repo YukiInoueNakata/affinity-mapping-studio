@@ -42,6 +42,10 @@ export function SyncStatusBadge({ onOpenConnect }: Props) {
   const isActive = state.status !== 'idle';
   const role = state.role?.role;
   const showRoleBadge = isConnected && role && role !== 'editor'; // editor は既定なので非表示
+  // CA2 (2026-06-09): legacy client 警告 banner
+  const upgradeRecommended = state.role?.upgradeRecommended;
+  // CA3 (2026-06-09): matchedRule で tooltip 拡張
+  const matchedRule = state.role?.matchedRule;
 
   return (
     <div className="sync-status-area">
@@ -52,7 +56,8 @@ export function SyncStatusBadge({ onOpenConnect }: Props) {
         title={
           isConnected
             ? `ルーム: ${state.meta?.roomId} / ${state.meta?.serverUrl}` +
-              (role ? `\nロール: ${role}${state.role?.via ? ` (${state.role.via})` : ''}` : '')
+              (role ? `\nロール: ${role}${state.role?.via ? ` (${state.role.via})` : ''}` : '') +
+              (matchedRule ? `\n${matchedRule}` : '')
             : 'サーバーに接続して共同編集'
         }
         style={{
@@ -109,6 +114,29 @@ export function SyncStatusBadge({ onOpenConnect }: Props) {
         >
           切断
         </button>
+      )}
+
+      {/* CA2 (2026-06-09): legacy client 警告 banner */}
+      {upgradeRecommended && (
+        <span
+          className="sync-upgrade-banner"
+          title={
+            upgradeRecommended.message +
+            (upgradeRecommended.downloadHint ? '\n' + upgradeRecommended.downloadHint : '')
+          }
+          style={{
+            background: '#8a6d3b',
+            color: '#fff',
+            padding: '2px 8px',
+            borderRadius: 10,
+            fontSize: 10,
+            fontWeight: 600,
+            cursor: 'help',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          更新推奨
+        </span>
       )}
     </div>
   );

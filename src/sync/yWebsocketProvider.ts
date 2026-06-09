@@ -154,13 +154,22 @@ export class YjsWebsocketProvider {
       this.emit({ type: 'error', error: new Error('WebSocket error') });
     };
     socket.onclose = (ev) => {
-      // 1006 = abnormal closure (e.g. server returned HTTP 401 during upgrade,
-      // OR the server died after we were connected).  Distinguish the two by
-      // whether we have ever managed to open a WebSocket to this URL: if not,
-      // it's HTTP-401-style auth denial; if yes, it's a server crash/restart.
+      // CA1 (2026-06-09): 4xxx range は サーバーが reason 細分化して送ってくる
+      // (KJ Studio Server v0.2.x+)
+      if (ev.code >= 4000 && ev.code < 4100) {
+        const msg = humanReadableReason(ev.code, ev.reason);
+        this.setStatus('auth-denied', msg);
+        this.ws = null;
+        // 自動再接続しない (auth denial)
+        return;
+      }
+      // 1006 = abnormal closure (legacy server / network エラー)
+      // hasEverOpened が false なら HTTP-401-style auth denial (古いサーバー)
       if (ev.code === 1006 && !this.hasEverOpened) {
-        this.setStatus('auth-denied', '招待リスト外のメアド or 接続拒否');
-        // Don't auto-reconnect on auth denial
+        this.setStatus(
+          'auth-denied',
+          '接続拒否 (古いサーバーかも．reason: ' + (ev.reason || 'unknown') + ')'
+        );
         return;
       }
       this.setStatus('disconnected', `code=${ev.code} reason=${ev.reason}`);
@@ -371,5 +380,59 @@ export class YjsWebsocketProvider {
       this.reconnectTimer = null;
       this.connect();
     }, delay);
+  }
+}
+
+/** CA1 (2026-06-09): KJ Studio Server の WS close 4xxx を日本語メッセージに．
+ *  サーバー (src/index.js) の rejectUpgrade() が送る code/reason に対応．
+ *  reason は "code-name:detail" 形式 (detail は requirement-group-failed のみ付与)． */
+export function humanReadableReason(code: number, reason: string): string {
+  const parts = (reason || '').split(':');
+  const baseReason = parts[0];
+  const detail = parts.slice(1).join(':');
+  switch (code) {
+    case 4001:
+      return '招待 token が無効です．管理者に新しい招待 URL を依頼してください';
+    case 4002:
+      return '招待 token の有効期限が切れています';
+    case 4003:
+      return '招待 token の最大使用回数を超えました';
+    case 4004:
+      return 'ルームパスワードが違います';
+    case 4005:
+      return 'ルームが見つかりません．room ID を確認してください';
+    case 4006:
+      return 'ルーム ID の形式が不正です';
+    case 4007: {
+      // detail は "inviteToken|roomPassword" 等の OR グループ
+      const methodLabels: Record<string, string> = {
+        inviteToken: '招待 token',
+        roomPassword: 'パスワード',
+        emailLegacy: 'メアド (legacy)',
+        tailscale: 'Tailscale 接続',
+        ipCidr: '許可 IP',
+        trustedProxy: 'reverse-proxy 認証',
+        localhostAuto: 'localhost 接続',
+        noneOpen: '認証なし',
+      };
+      const labels = (detail || '')
+        .split('|')
+        .map((m) => methodLabels[m] ?? m)
+        .filter(Boolean);
+      const need = labels.length > 0 ? labels.join(' または ') : '何らかの認証';
+      return `認証要件を満たしていません (必要: ${need})`;
+    }
+    case 4008:
+      return 'ルームが満員です．時間を置いて再試行してください';
+    case 4009:
+      return '接続が多すぎます．数秒待って再試行してください';
+    case 4010:
+      return '接続元 Origin が許可されていません (サーバーの allowlist を確認)';
+    case 4011:
+      return 'WebSocket プロトコルが対応していません (クライアントが古い可能性)';
+    case 4999:
+      return `認証に失敗しました (${baseReason || 'unauthorized'})`;
+    default:
+      return `接続拒否: ${reason || 'unknown'} (code=${code})`;
   }
 }

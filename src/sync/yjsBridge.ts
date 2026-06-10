@@ -127,6 +127,33 @@ function yMapToRecord(m: Y.Map<unknown> | Record<string, unknown> | unknown): Re
   return r;
 }
 
+// #134 防御 (2026-06-10 incident): 壊れた room データ (Y.Array 内に同一 id の
+// レコードが複数) をそのまま store に流すと UI 全域で重複表示や MiniSearch crash の
+// 引き金になる．hydrate 境界で最初の 1 件だけ残して落とす．根本修復は dedup-room.mjs．
+function uniqById(
+  records: Record<string, unknown>[],
+  table: string
+): Record<string, unknown>[] {
+  const seen = new Set<string>();
+  let dropped = 0;
+  const out: Record<string, unknown>[] = [];
+  for (const r of records) {
+    const id = r.id;
+    if (typeof id === 'string') {
+      if (seen.has(id)) {
+        dropped += 1;
+        continue;
+      }
+      seen.add(id);
+    }
+    out.push(r);
+  }
+  if (dropped > 0) {
+    console.warn(`[yjsBridge] table=${table}: dropped ${dropped} duplicate-id record(s) on hydrate`);
+  }
+  return out;
+}
+
 export class YjsSyncBridge {
   readonly doc: Y.Doc;
   /** Used as the `origin` for transactions we initiate locally — lets observers
@@ -175,7 +202,7 @@ export class YjsSyncBridge {
     for (const name of TABLE_NAMES) {
       const arr = tables.get(name) as Y.Array<Y.Map<unknown>> | undefined;
       out[name] = arr
-        ? (arr.toArray() as Y.Map<unknown>[]).map((m) => yMapToRecord(m))
+        ? uniqById((arr.toArray() as Y.Map<unknown>[]).map((m) => yMapToRecord(m)), name)
         : [];
     }
     return out as ProjectData;

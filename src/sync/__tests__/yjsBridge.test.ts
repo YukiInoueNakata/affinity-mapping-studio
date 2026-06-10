@@ -125,6 +125,23 @@ describe('YjsSyncBridge — seed + dump round-trip', () => {
     expect(out.labels[0].holdMemo).toBe('保留');
   });
 
+  it('#134: drops duplicate-id records on hydrate (keeps first)', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.seedFromProjectData(sampleData());
+    // 壊れた room を再現: cards テーブルに同一 id 'c1' のレコードをもう 1 件直接 push
+    const cardsArr = bridge.doc.getMap('tables').get('cards') as Y.Array<Y.Map<unknown>>;
+    const dup = new Y.Map<unknown>();
+    dup.set('id', 'c1');
+    dup.set('body', '重複コピー');
+    cardsArr.push([dup]);
+    expect(cardsArr.length).toBe(2);
+
+    const out = bridge.toProjectData();
+    expect(out.cards.length).toBe(1);
+    expect(out.cards[0].id).toBe('c1');
+    expect(out.cards[0].body).toBe('カード本文');
+  });
+
   it('persists Y.Text fields as Y.Text instances inside Y.Map', () => {
     const bridge = new YjsSyncBridge();
     bridge.seedFromProjectData(sampleData());

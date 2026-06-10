@@ -139,7 +139,25 @@ export function buildSearchIndex(data: ProjectData) {
       return [...ascii, ...cjk];
     },
   });
-  ms.addAll(buildSearchDocs(data));
+  // v0.2.14 robustness (2026-06-10 incident):
+  // 壊れた sync (cards.id 重複等) で MiniSearch.addAll が throw すると React の
+  // Error Boundary 不在のため画面真っ暗に．id で uniq してから add する．
+  const docs = buildSearchDocs(data);
+  const seen = new Set<string>();
+  const uniq: SearchDoc[] = [];
+  let dupCount = 0;
+  for (const d of docs) {
+    if (seen.has(d.id)) {
+      dupCount++;
+      continue;
+    }
+    seen.add(d.id);
+    uniq.push(d);
+  }
+  if (dupCount > 0) {
+    console.warn(`[search] dropped ${dupCount} duplicate doc id(s) before MiniSearch add`);
+  }
+  ms.addAll(uniq);
   return ms;
 }
 

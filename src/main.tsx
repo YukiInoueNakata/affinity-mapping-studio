@@ -8,7 +8,12 @@ import { getVersion } from '@tauri-apps/api/app';
 import { App } from './App.js';
 import { SourceWindow } from './SourceWindow.js';
 import { useProjectStore } from './stores/projectStore.js';
+import { installErrorBuffer } from './utils/errorBuffer.js';
 import './styles.css';
+
+// v0.2.15: 診断用エラーログ buffer をすべての import より前に install して
+// 早期のエラーも捕捉．
+installErrorBuffer();
 
 // ウィンドウタイトルを「KJ Studio v0.x.y」形式に動的設定．
 // 旧名「KJ Trace Studio」を「KJ Studio」へ変更 (2026-06-02)．

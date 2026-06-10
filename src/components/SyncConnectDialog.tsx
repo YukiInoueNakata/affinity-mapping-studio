@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSyncManager } from '../sync/useSyncManager.js';
+import { formatRecentErrors, clearErrorBuffer } from '../utils/errorBuffer.js';
 
 interface Props {
   open: boolean;
@@ -130,6 +131,91 @@ export function SyncConnectDialog({ open, onClose }: Props) {
       setBusy(false);
     }
     onClose();
+  };
+
+  // v0.2.15: PC 初心者向けリカバリー — IndexedDB / localStorage を一括削除．
+  // DevTools / PowerShell を使えないユーザーでも壊れたローカル状態をリセットできる．
+  const handleClearCache = async () => {
+    if (state.status !== 'disconnected') {
+      alert('接続中はクリアできません．先にキャンセル/切断してください．');
+      return;
+    }
+    const ok = window.confirm(
+      'ローカルキャッシュを完全に削除します．\n\n' +
+        '・サーバー上のデータは安全です\n' +
+        '・接続前の未保存のローカル編集が失われる可能性があります\n' +
+        '・「画面が真っ暗」「重複表示」が起きた時の修復用\n\n' +
+        '続行しますか?',
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      let deleted = 0;
+      const blockedNames: string[] = [];
+      // indexedDB.databases() で y-indexeddb 系の全 DB を列挙
+      const list = (await (indexedDB.databases?.() ?? Promise.resolve([]))) as {
+        name?: string;
+      }[];
+      for (const db of list) {
+        const name = db.name;
+        if (!name) continue;
+        if (!(name.startsWith('kj-room-') || name.startsWith('y-indexeddb'))) continue;
+        await new Promise<void>((resolve) => {
+          const req = indexedDB.deleteDatabase(name);
+          req.onsuccess = () => {
+            deleted++;
+            resolve();
+          };
+          req.onerror = () => resolve();
+          req.onblocked = () => {
+            blockedNames.push(name);
+            resolve();
+          };
+        });
+      }
+      // localStorage の sync 設定もリセット (再入力の手間と引き換えに確実性)
+      try {
+        localStorage.removeItem(LOCAL_STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+      // 入力フォームも初期化
+      setForm(defaults);
+
+      if (blockedNames.length > 0) {
+        alert(
+          `削除しましたが ${blockedNames.length} 個の DB が他のウィンドウで使用中で残りました．\n` +
+            `アプリを完全に終了してから再度実行してください．\n\n` +
+            `残った DB: ${blockedNames.join(', ')}`,
+        );
+      } else {
+        alert(`ローカルキャッシュをクリアしました (${deleted} DB)．\n接続をやり直してください．`);
+      }
+    } catch (e) {
+      setError(`クリア失敗: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCopyLogs = async () => {
+    try {
+      const text = formatRecentErrors();
+      await navigator.clipboard.writeText(text);
+      alert('診断ログをクリップボードにコピーしました．\nメール等で開発者に貼付してください．');
+    } catch (e) {
+      // clipboard 失敗時は textarea で fallback
+      const text = formatRecentErrors();
+      prompt('クリップボードにコピーできませんでした．以下を選択してコピーしてください．', text);
+    }
+  };
+
+  const handleClearLogs = () => {
+    if (window.confirm('診断ログをクリアしますか?')) {
+      clearErrorBuffer();
+      alert('クリアしました');
+    }
   };
 
   return (
@@ -268,6 +354,45 @@ export function SyncConnectDialog({ open, onClose }: Props) {
               接続に失敗: {error}
             </div>
           )}
+
+          {/* v0.2.15: PC 初心者向けリカバリーセクション (折りたたみ) */}
+          <details style={{ marginTop: 12, paddingTop: 8, borderTop: '1px solid #ddd' }}>
+            <summary style={{ cursor: 'pointer', fontSize: 12, color: '#666' }}>
+              ⚠ うまく繋がらない / 「真っ暗」になる場合 (高度な操作)
+            </summary>
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <button
+                type="button"
+                onClick={handleClearCache}
+                disabled={busy || state.status === 'connected'}
+                style={{ fontSize: 12 }}
+              >
+                🧹 ローカルキャッシュをクリア
+              </button>
+              <span className="muted small">
+                壊れたキャッシュ (重複データ・真っ暗画面の修復)．サーバー上のデータは安全．
+              </span>
+
+              <button
+                type="button"
+                onClick={handleCopyLogs}
+                style={{ marginTop: 4, fontSize: 12 }}
+              >
+                📋 診断ログをコピー (報告用)
+              </button>
+              <span className="muted small">
+                最近のエラーをコピー．メール等で報告に．
+              </span>
+
+              <button
+                type="button"
+                onClick={handleClearLogs}
+                style={{ marginTop: 2, fontSize: 11 }}
+              >
+                🗑 診断ログをクリア
+              </button>
+            </div>
+          </details>
         </div>
         <footer className="modal-footer">
           <button type="button" onClick={handleCancel}>

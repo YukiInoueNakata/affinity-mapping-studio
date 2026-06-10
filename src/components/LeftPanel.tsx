@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import { flattenGroupTree, getGroupLabel, getUngroupedCards, levelPrefix } from '../domain/groups.js';
-import { makeRenameParticipantCommand } from '../stores/commands.js';
+import {
+  makeRenameParticipantCommand,
+  makeDeleteParticipantCommand,
+  makeMergeParticipantsCommand,
+} from '../stores/commands.js';
 import { SearchPanel } from './SearchPanel.js';
 import type { SearchHit } from '../domain/search.js';
 
@@ -34,6 +38,66 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
   // (#2) 参加者名のインライン編集 (右クリックで開始)
   const [renamingPid, setRenamingPid] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+
+  // v0.2.15 (#131/#137): 参加者の右クリック context menu (rename/delete/merge)
+  // 右クリック時に menuParticipantId をセットして floating メニューを開く．
+  const [menuParticipantId, setMenuParticipantId] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [mergeFromId, setMergeFromId] = useState<string | null>(null);
+
+  const handleDeleteParticipant = (pid: string) => {
+    if (!project) return;
+    const p = project.data.participants.find((x) => x.id === pid);
+    if (!p) return;
+    const segCount = project.data.source_segments.filter(
+      (s) => s.participantId === pid && !s.deletedAt
+    ).length;
+    const cardCount = project.data.cards.filter((c) => c.participantId === pid).length;
+    if (segCount > 0 || cardCount > 0) {
+      alert(
+        `参加者 "${p.code}" は seg ${segCount} / card ${cardCount} を持っています．\n` +
+          `先にセグメント/カードを削除するか，他の参加者にマージしてください．`
+      );
+      return;
+    }
+    if (!confirm(`参加者 "${p.code}" (${p.displayName}) を削除しますか?`)) return;
+    applyCommand(makeDeleteParticipantCommand(p));
+    setMenuParticipantId(null);
+  };
+
+  const startMerge = (fromId: string) => {
+    setMergeFromId(fromId);
+    setMenuParticipantId(null);
+  };
+
+  const handleConfirmMerge = (toId: string) => {
+    if (!project || !mergeFromId) return;
+    const fromP = project.data.participants.find((p) => p.id === mergeFromId);
+    const toP = project.data.participants.find((p) => p.id === toId);
+    if (!fromP || !toP) {
+      setMergeFromId(null);
+      return;
+    }
+    const fromCardCount = project.data.cards.filter((c) => c.participantId === mergeFromId).length;
+    const ok = confirm(
+      `参加者をマージします:\n\n` +
+        `  ${fromP.code} (${fromP.displayName}) → ${toP.code} (${toP.displayName})\n\n` +
+        `・${fromP.code} の ${fromCardCount} 枚のカードが ${toP.code} に統合されます\n` +
+        `・カード番号は ${toP.code} 起点で再発番されます (例: ${fromP.code}-001 → ${toP.code}-XXX)\n` +
+        `・${fromP.code} 参加者は削除されます\n` +
+        `・Undo で元に戻せます\n\n` +
+        `続行しますか?`
+    );
+    if (!ok) return;
+    applyCommand(
+      makeMergeParticipantsCommand(mergeFromId, toId, {
+        participants: project.data.participants,
+        cards: project.data.cards,
+        source_segments: project.data.source_segments,
+      })
+    );
+    setMergeFromId(null);
+  };
 
   const commitRename = (pid: string) => {
     if (!project) {
@@ -173,10 +237,10 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
-                setRenameDraft(p.displayName);
-                setRenamingPid(p.id);
+                setMenuParticipantId(p.id);
+                setMenuPos({ x: e.clientX, y: e.clientY });
               }}
-              title="右クリックで名前を変更"
+              title="右クリックで操作メニュー (名前変更 / マージ / 削除)"
             >
               <button
                 type="button"
@@ -216,6 +280,139 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
             <li className="muted">(まだ参加者がありません)</li>
           )}
         </ul>
+
+        {/* v0.2.15 (#131/#137): 参加者 右クリックメニュー */}
+        {menuParticipantId && menuPos && (() => {
+          const p = project?.data.participants.find((x) => x.id === menuParticipantId);
+          if (!p) return null;
+          const segCount = project!.data.source_segments.filter(
+            (s) => s.participantId === p.id && !s.deletedAt
+          ).length;
+          const cardCount = project!.data.cards.filter((c) => c.participantId === p.id).length;
+          const canDelete = segCount === 0 && cardCount === 0;
+          return (
+            <>
+              <div
+                style={{
+                  position: 'fixed',
+                  inset: 0,
+                  zIndex: 1000,
+                }}
+                onClick={() => setMenuParticipantId(null)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenuParticipantId(null);
+                }}
+              />
+              <div
+                style={{
+                  position: 'fixed',
+                  left: menuPos.x,
+                  top: menuPos.y,
+                  background: 'white',
+                  border: '1px solid #ccc',
+                  borderRadius: 4,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  padding: 4,
+                  zIndex: 1001,
+                  minWidth: 180,
+                  fontSize: 12,
+                }}
+              >
+                <div style={{ padding: '4px 8px', color: '#888', fontSize: 11, borderBottom: '1px solid #eee' }}>
+                  {p.code} ({p.displayName})
+                </div>
+                <button
+                  type="button"
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                  onClick={() => {
+                    setRenameDraft(p.displayName);
+                    setRenamingPid(p.id);
+                    setMenuParticipantId(null);
+                  }}
+                >
+                  ✏️ 名前を変更
+                </button>
+                <button
+                  type="button"
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                  onClick={() => startMerge(p.id)}
+                  disabled={(project?.data.participants.length ?? 0) < 2}
+                  title={(project?.data.participants.length ?? 0) < 2 ? 'マージ先が他にいません' : ''}
+                >
+                  🔀 他の参加者にマージ...
+                </button>
+                <button
+                  type="button"
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', border: 'none', background: 'transparent', cursor: canDelete ? 'pointer' : 'not-allowed', color: canDelete ? '#c33' : '#aaa' }}
+                  onClick={() => handleDeleteParticipant(p.id)}
+                  disabled={!canDelete}
+                  title={canDelete ? '' : `seg ${segCount} / card ${cardCount} があります．先にマージか削除を．`}
+                >
+                  🗑 削除 {canDelete ? '' : `(seg ${segCount}/card ${cardCount} 残)`}
+                </button>
+              </div>
+            </>
+          );
+        })()}
+
+        {/* v0.2.15 (#131): マージ先選択ダイアログ */}
+        {mergeFromId && (() => {
+          const fromP = project?.data.participants.find((x) => x.id === mergeFromId);
+          if (!fromP) return null;
+          const candidates = project?.data.participants.filter((x) => x.id !== mergeFromId) ?? [];
+          return (
+            <div
+              className="modal-backdrop"
+              style={{ zIndex: 1100 }}
+              onClick={() => setMergeFromId(null)}
+            >
+              <div
+                className="modal"
+                onClick={(e) => e.stopPropagation()}
+                style={{ width: 360 }}
+              >
+                <header className="modal-header">
+                  <h2 style={{ margin: 0, fontSize: 14 }}>参加者をマージ</h2>
+                </header>
+                <div className="modal-body">
+                  <p style={{ margin: '4px 0', fontSize: 12 }}>
+                    <strong>{fromP.code}</strong> ({fromP.displayName}) を
+                    どの参加者にマージしますか?
+                  </p>
+                  <p className="muted small" style={{ margin: '4px 0' }}>
+                    マージ先のカード番号体系で再発番されます (例: P13-001 → P12-XXX)
+                  </p>
+                  {candidates.length === 0 ? (
+                    <p className="muted small">マージ先となる参加者がいません．</p>
+                  ) : (
+                    <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0', maxHeight: 240, overflowY: 'auto' }}>
+                      {candidates.map((c) => {
+                        const ccnt = project!.data.cards.filter((x) => x.participantId === c.id).length;
+                        return (
+                          <li key={c.id} style={{ padding: '2px 0' }}>
+                            <button
+                              type="button"
+                              style={{ width: '100%', textAlign: 'left', padding: '6px 8px', cursor: 'pointer' }}
+                              onClick={() => handleConfirmMerge(c.id)}
+                            >
+                              <strong>{c.code}</strong> {c.displayName} (card {ccnt})
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+                <footer className="modal-footer">
+                  <button type="button" onClick={() => setMergeFromId(null)}>
+                    キャンセル
+                  </button>
+                </footer>
+              </div>
+            </div>
+          );
+        })()}
       </section>
 
       <section className="panel-section">

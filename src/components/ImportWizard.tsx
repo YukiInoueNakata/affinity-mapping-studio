@@ -127,7 +127,11 @@ export function ImportWizard({ open, onClose }: Props) {
     [file]
   );
 
-  // Reset everything when the dialog opens
+  // Reset everything when the dialog opens (not when project changes while open).
+  // v0.2.14 Fix-1: depending on `project` caused every sync transaction or local
+  // mutation to re-reset the wizard mid-input (e.g. speaker prefix chips), kicking
+  // the user back to the file-selection step. project is read via closure to get
+  // the latest snapshot at the moment of opening.
   useEffect(() => {
     if (open) {
       setStepIdx(0);
@@ -156,7 +160,8 @@ export function ImportWizard({ open, onClose }: Props) {
       setSpeakerContinue(true);
       setError(null);
     }
-  }, [open, project]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   /** 発言者プレフィクス検出に使うオプション．プレフィクスが 1 つも未入力なら無効． */
   const speakerOpts: SpeakerPrefixOptions | null = useMemo(() => {
@@ -424,17 +429,28 @@ export function ImportWizard({ open, onClose }: Props) {
           setError('参加者コードは英字始まり 1〜10 文字 (英数字) で入力してください');
           return;
         }
-        if (project.data.participants.some((p) => p.code === code)) {
-          setError(`参加者コード "${code}" は既に存在します`);
-          return;
+        // v0.2.14 Fix-2: 重複コードでも confirm 後に既存 participant へ追加取込
+        const existing = project.data.participants.find((p) => p.code === code);
+        if (existing) {
+          const ok = window.confirm(
+            `参加者コード "${code}" は既に存在します (${existing.displayName})．\n\n` +
+              `既存の "${code}" に追加で取り込みますか?\n` +
+              `(セグメントとカードは新規発番されます．既存データは変更されません．)`,
+          );
+          if (!ok) {
+            setError('取り込みを中止しました');
+            return;
+          }
+          plan = { ...plan, participantId: existing.id };
+        } else {
+          newParticipantFromInterview = {
+            id: newId(),
+            code,
+            displayName: newName.trim() || code,
+            createdAt: now,
+          };
+          plan = { ...plan, participantId: newParticipantFromInterview.id };
         }
-        newParticipantFromInterview = {
-          id: newId(),
-          code,
-          displayName: newName.trim() || code,
-          createdAt: now,
-        };
-        plan = { ...plan, participantId: newParticipantFromInterview.id };
       } else {
         const exists = project.data.participants.some((p) => p.id === participantId);
         if (!exists) {

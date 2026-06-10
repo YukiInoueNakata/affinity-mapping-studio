@@ -575,6 +575,101 @@ export function makeRenameParticipantCommand(
 }
 
 /**
+ * v0.2.15 (#137): 単独で参加者を削除する．
+ * segments / cards 0 件の participant を消すための「ハウスキーピング」用．
+ * 紐づくデータが残っている場合は呼び出し側で拒否する．
+ */
+export function makeDeleteParticipantCommand(
+  prevParticipant: Participant
+): DomainCommand {
+  return {
+    label: `参加者を削除: ${prevParticipant.code}`,
+    apply: (d) => ({
+      ...d,
+      participants: d.participants.filter((p) => p.id !== prevParticipant.id),
+    }),
+    revert: (d) => ({
+      ...d,
+      participants: [...d.participants, prevParticipant],
+    }),
+  };
+}
+
+/**
+ * v0.2.15 (#131): 参加者 from を参加者 to にマージする．
+ * - from の segments / cards / source_links / positions の participantId を to に
+ * - from の cards の code を to のコード起点で再発番 (P13-001 → P12-NNN)
+ * - from participant を削除
+ * - Undo は完全 snapshot から復元．
+ *
+ * 呼び出し側で:
+ *   - from と to が異なる existing participant であることを確認
+ *   - prev snapshot を渡す
+ */
+export function makeMergeParticipantsCommand(
+  fromId: string,
+  toId: string,
+  prevSnapshot: {
+    participants: Participant[];
+    cards: Card[];
+    source_segments: SourceSegment[];
+  }
+): DomainCommand {
+  return {
+    label: `参加者をマージ`,
+    apply: (d) => {
+      const fromP = d.participants.find((p) => p.id === fromId);
+      const toP = d.participants.find((p) => p.id === toId);
+      if (!fromP || !toP) return d;
+
+      // to の cards で最大の serial を取得
+      const codeToSerial = (code: string): number => {
+        const m = code.match(/-(\d+)$/);
+        return m ? parseInt(m[1], 10) : 0;
+      };
+      const toCardsMaxSerial = d.cards
+        .filter((c) => c.participantId === toId)
+        .map((c) => codeToSerial(c.code))
+        .reduce((a, b) => Math.max(a, b), 0);
+
+      // from の cards を serial 昇順でソート + 新コード割当
+      const fromCardsSorted = d.cards
+        .filter((c) => c.participantId === fromId)
+        .sort((a, b) => codeToSerial(a.code) - codeToSerial(b.code));
+      const newCodeMap = new Map<string, string>();
+      fromCardsSorted.forEach((c, i) => {
+        const newSerial = toCardsMaxSerial + i + 1;
+        const newCode = `${toP.code}-${String(newSerial).padStart(3, '0')}`;
+        newCodeMap.set(c.id, newCode);
+      });
+
+      return {
+        ...d,
+        participants: d.participants.filter((p) => p.id !== fromId),
+        cards: d.cards.map((c) =>
+          c.participantId === fromId
+            ? {
+                ...c,
+                participantId: toId,
+                code: newCodeMap.get(c.id) ?? c.code,
+              }
+            : c
+        ),
+        source_segments: d.source_segments.map((s) =>
+          s.participantId === fromId ? { ...s, participantId: toId } : s
+        ),
+      };
+    },
+    revert: (d) => ({
+      ...d,
+      participants: prevSnapshot.participants,
+      cards: prevSnapshot.cards,
+      source_segments: prevSnapshot.source_segments,
+    }),
+  };
+}
+
+/**
  * (#1) Delete a whole imported file: soft-delete its segments AND remove any
  * participants that become orphaned (no remaining active segments and no
  * cards).  Caller computes `orphanedParticipants`.  Undo restores both.

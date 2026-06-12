@@ -1372,6 +1372,10 @@ function CanvasViewImpl() {
       <div className="canvas-main">
         <div className="canvas-flow" onDrop={onDrop} onDragOver={onDragOver}>
           <ReactFlow
+            style={{
+              background:
+                project?.metadata.displaySettings?.canvasBackground ?? '#ffffff',
+            }}
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}

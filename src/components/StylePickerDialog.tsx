@@ -225,7 +225,7 @@ function ColorPickerRow({
   );
 }
 
-function PresetSwatches({
+export function PresetSwatches({
   value,
   onChange,
   showCustom,

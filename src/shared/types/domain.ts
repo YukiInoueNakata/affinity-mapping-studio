@@ -456,6 +456,8 @@ export interface DisplaySettings {
   cardWrapWidth?: number;
   cardFontSize?: number;
   groupFontSize?: number;
+  /** KJ キャンバスの地の色．未指定なら白 (#ffffff)． */
+  canvasBackground?: string;
 }
 
 export interface ProjectMetadata {

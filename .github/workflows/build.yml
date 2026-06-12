@@ -1,4 +1,4 @@
-name: Build (macOS DMG + Windows NSIS)
+name: Build (macOS DMG + Windows MSI)
 
 on:
   # Trigger on tag push (e.g., `git push origin v0.2.0`).
@@ -27,9 +27,9 @@ jobs:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             rust-targets: 'x86_64-pc-windows-msvc'
-            bundles: 'nsis'
-            artifact-name: kj-studio-windows-x64
-            artifact-glob: 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe'
+            bundles: 'msi'
+            artifact-name: kj-studio-windows-x64-msi
+            artifact-glob: 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi'
 
     runs-on: ${{ matrix.platform }}
 
@@ -78,9 +78,9 @@ jobs:
             2. 初回起動: Finder で `.app` を **右クリック → 開く**，ダイアログで「開く」
             3. もしくは Terminal で `xattr -d com.apple.quarantine /Applications/KJ\ Trace\ Studio.app`
 
-            ## Windows (NSIS .exe)
+            ## Windows (MSI)
 
-            1. `.exe` を実行 → SmartScreen が出たら「詳細情報 → 実行」
-            2. インストール先・スタートメニュー / デスクトップショートカットを選択
+            1. `.msi` を実行 → SmartScreen が出たら「詳細情報 → 実行」
+            2. ウィザードに従ってインストール（管理者権限が必要な場合あり）
           files: |
             ${{ matrix.artifact-glob }}

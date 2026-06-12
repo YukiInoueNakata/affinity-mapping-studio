@@ -76,6 +76,12 @@ class SyncManager {
   private provider: YjsWebsocketProvider | null = null;
   private idb: IndexeddbPersistence | null = null;
   private unsubProvider: (() => void) | null = null;
+  /** v0.2.16: epoch 不一致からの clean 再接続に使う直近の接続オプション． */
+  private lastOpts: ConnectOptions | null = null;
+  /** epoch 一致 / 初回時に「同期完了後 localStorage に保存する epoch」を一時保持． */
+  private pendingEpoch: string | null = null;
+  /** epoch 不一致リカバリ中フラグ (再帰的な reconnect ループを防ぐ)． */
+  private epochRecovering = false;
 
   getState(): SyncState {
     return this.state;
@@ -90,6 +96,11 @@ class SyncManager {
    *  on auth-denied / error within 10 seconds). */
   async connect(opts: ConnectOptions): Promise<void> {
     this.disconnect();
+    this.lastOpts = opts;
+    // v0.2.16: このルームについて最後に同期した docEpoch を読み込む．
+    // サーバーの epoch と不一致なら古い lineage のキャッシュとみなして抑止する．
+    const storedEpoch = readEpoch(opts.roomId);
+    this.pendingEpoch = null;
 
     const doc = new Y.Doc();
 
@@ -115,6 +126,7 @@ class SyncManager {
       token: opts.token,
       password: opts.password,
       doc,
+      expectedEpoch: storedEpoch,
     });
     // Hand the awareness instance a small "user" payload so other peers see us
     provider.awareness.setLocalStateField('user', {
@@ -166,6 +178,25 @@ class SyncManager {
         this.setState({ status: e.status, errorDetail: e.detail ?? null });
       } else if (e.type === 'sync') {
         this.setState({ synced: e.synced });
+        // v0.2.16: 同期完了時にサーバー epoch を保存．次回接続で一致判定に使う．
+        if (e.synced && this.pendingEpoch) {
+          writeEpoch(opts.roomId, this.pendingEpoch);
+          this.pendingEpoch = null;
+        }
+      } else if (e.type === 'epoch') {
+        if (e.serverEpoch === null) {
+          // epoch 非対応サーバー: 何もしない (旧挙動)．
+        } else if (e.matched === false) {
+          // 不一致: ローカルキャッシュが古い lineage．破棄して clean 再接続する．
+          console.warn(
+            `[sync] docEpoch mismatch (stored=${e.expected} server=${e.serverEpoch}) — ` +
+              'ローカルキャッシュを破棄して再同期します',
+          );
+          void this.recoverFromEpochMismatch(opts.roomId, e.serverEpoch);
+        } else {
+          // 一致 / 初回: 同期完了後に保存する epoch として控える．
+          this.pendingEpoch = e.serverEpoch;
+        }
       } else if (e.type === 'error') {
         this.setState({ errorDetail: e.error.message });
       } else if (e.type === 'role-assigned') {
@@ -266,6 +297,30 @@ class SyncManager {
     setEditGateRole(null);
   }
 
+  /** v0.2.16: docEpoch 不一致からの復旧．
+   *  古い lineage のローカルキャッシュ (IndexedDB) を破棄し，サーバーの新しい
+   *  epoch を保存してから clean 再接続する．clean な doc は空なので
+   *  「サーバーが欠いている操作」が無く，アップロードは発生しない (download-only)．
+   *  これで古い 2.6 MB の再注入を防ぎつつ，サーバーの正しい状態に追従する． */
+  private async recoverFromEpochMismatch(roomId: string, serverEpoch: string): Promise<void> {
+    if (this.epochRecovering) return; // 再帰ガード
+    this.epochRecovering = true;
+    try {
+      // 新しい epoch を先に保存 → clean 再接続では一致するので再発しない．
+      writeEpoch(roomId, serverEpoch);
+      this.disconnect();
+      await deleteRoomCache(roomId);
+      const opts = this.lastOpts;
+      if (opts && opts.roomId === roomId) {
+        await this.connect(opts);
+      }
+    } catch (err) {
+      console.error('[sync] epoch mismatch recovery failed:', err);
+    } finally {
+      this.epochRecovering = false;
+    }
+  }
+
   // ---- internals ----
 
   private setState(patch: Partial<SyncState>): void {
@@ -315,6 +370,46 @@ class SyncManager {
 }
 
 export const syncManager = new SyncManager();
+
+// ---- v0.2.16 docEpoch helpers ----
+
+function epochKey(roomId: string): string {
+  return `kj-epoch-${roomId}`;
+}
+
+/** このルームについて最後に同期したサーバー docEpoch を読む (無ければ null)． */
+function readEpoch(roomId: string): string | null {
+  try {
+    const v = localStorage.getItem(epochKey(roomId));
+    return v && v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** サーバー docEpoch を保存．次回接続時の一致判定に使う． */
+function writeEpoch(roomId: string, epoch: string): void {
+  try {
+    localStorage.setItem(epochKey(roomId), epoch);
+  } catch {
+    /* localStorage 不可 (private mode 等) は無視 */
+  }
+}
+
+/** このルームの y-indexeddb キャッシュ (`kj-room-<roomId>`) を削除する．
+ *  epoch 不一致時に古い lineage のキャッシュを捨てるために使う． */
+function deleteRoomCache(roomId: string): Promise<void> {
+  return new Promise<void>((resolve) => {
+    try {
+      const req = indexedDB.deleteDatabase(`kj-room-${roomId}`);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
 
 function pickColor(seed: string): string {
   // Simple hash → HSL.  Good enough for distinguishing 2-5 ゼミ members.

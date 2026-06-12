@@ -1075,7 +1075,12 @@ export function App() {
     <div className="app-root" style={uiScale !== 1 ? { zoom: uiScale } : undefined}>
       <header className="app-header ribbon-header">
         <div className="ribbon-row-1">
-          <div className="app-title">{title}</div>
+          <div className="app-title">
+            {title}
+            <span className="app-version" title={`KJ Trace Studio v${__APP_VERSION__}`}>
+              v{__APP_VERSION__}
+            </span>
+          </div>
           <nav className="ribbon-tabs">
             <button
               type="button"

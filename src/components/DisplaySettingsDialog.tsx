@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
+import { PresetSwatches } from './StylePickerDialog.js';
 import type { DisplaySettings } from '@shared/types/domain';
 
 interface Props {
@@ -12,6 +13,7 @@ const DEFAULTS = {
   cardWrapWidth: 220,
   cardFontSize: 12,
   groupFontSize: 12,
+  canvasBackground: '#ffffff',
 };
 
 export function DisplaySettingsDialog({ open, onClose }: Props) {
@@ -30,6 +32,9 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
   const [groupFontSize, setGroupFontSize] = useState<number>(
     current?.groupFontSize ?? DEFAULTS.groupFontSize
   );
+  const [canvasBackground, setCanvasBackground] = useState<string>(
+    current?.canvasBackground ?? DEFAULTS.canvasBackground
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -37,6 +42,7 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
     setCardWrapWidth(current?.cardWrapWidth ?? DEFAULTS.cardWrapWidth);
     setCardFontSize(current?.cardFontSize ?? DEFAULTS.cardFontSize);
     setGroupFontSize(current?.groupFontSize ?? DEFAULTS.groupFontSize);
+    setCanvasBackground(current?.canvasBackground ?? DEFAULTS.canvasBackground);
   }, [open, current]);
 
   if (!open) return null;
@@ -47,6 +53,7 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
       cardWrapWidth,
       cardFontSize,
       groupFontSize,
+      canvasBackground,
     };
     setDisplaySettings(next);
     onClose();
@@ -108,6 +115,26 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
               onChange={(e) => setGroupFontSize(Number(e.target.value))}
             />
           </div>
+          <fieldset
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '120px 1fr',
+              gap: 8,
+              alignItems: 'start',
+              padding: 8,
+              border: '1px solid var(--border)',
+              borderRadius: 3,
+              marginTop: 4,
+            }}
+          >
+            <legend className="muted small">キャンバス背景色</legend>
+            <span className="muted small">色（標準: 白）</span>
+            <PresetSwatches
+              value={canvasBackground}
+              onChange={(v) => setCanvasBackground(v ?? DEFAULTS.canvasBackground)}
+              showCustom
+            />
+          </fieldset>
         </div>
         <footer className="modal-footer">
           <button type="button" onClick={onClose}>キャンセル</button>

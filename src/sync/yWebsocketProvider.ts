@@ -80,13 +80,23 @@ export interface YjsWebsocketProviderOptions {
   reconnectBackoffMs?: number;
   /** Auto-reconnect after unclean disconnect (default true). */
   autoReconnect?: boolean;
+  /** v0.2.16: このルームについてクライアントが最後に同期した docEpoch
+   *  (lineage 世代 ID)．サーバーが MESSAGE_KJ_META で返す docEpoch と不一致なら，
+   *  ローカルキャッシュが古い lineage なのでアップロードを抑止する
+   *  (= 古い 2.6 MB を再注入しない)．null/undefined のときはキャッシュ無し
+   *  (= 抑止しない)． */
+  expectedEpoch?: string | null;
 }
 
 export type ProviderEvent =
   | { type: 'status'; status: ProviderStatus; detail?: string }
   | { type: 'sync'; synced: boolean }
   | { type: 'error'; error: Error }
-  | { type: 'role-assigned'; assignment: KjRoleAssignment };
+  | { type: 'role-assigned'; assignment: KjRoleAssignment }
+  /** v0.2.16: サーバーから docEpoch を受信したとき発火．
+   *  matched=false は「ローカルキャッシュが古い lineage」を意味し，
+   *  SyncManager はキャッシュを破棄して clean 再接続する． */
+  | { type: 'epoch'; serverEpoch: string | null; expected: string | null; matched: boolean };
 
 export class YjsWebsocketProvider {
   readonly opts: Required<Pick<YjsWebsocketProviderOptions, 'serverUrl' | 'roomId' | 'doc'>> &
@@ -103,6 +113,13 @@ export class YjsWebsocketProvider {
    *  Used to distinguish HTTP-401-style auth denial (never opened) from a
    *  server crash / restart (opened previously, now refused). */
   private hasEverOpened = false;
+  /** v0.2.16: docEpoch 不一致を検出したらアップロードを抑止する．
+   *  古い lineage のローカルキャッシュをサーバーに再注入しないため．
+   *  MESSAGE_KJ_META は サーバーの SyncStep1 より先に届く (TCP 順序保証) ので，
+   *  SyncStep1 への reply (= upload) を計算する前にこのフラグを立てられる． */
+  private suppressUpload = false;
+  /** 直近に受信したサーバー docEpoch (null = epoch 非対応サーバー)． */
+  private serverEpoch: string | null = null;
 
   constructor(opts: YjsWebsocketProviderOptions) {
     this.opts = {
@@ -152,6 +169,9 @@ export class YjsWebsocketProvider {
     socket.onopen = () => {
       this.reconnectAttempt = 0;
       this.hasEverOpened = true;
+      // v0.2.16: 接続のたびに抑止フラグをリセット．直後に届く MESSAGE_KJ_META が
+      // epoch 不一致なら再び立てる (KJ_META は SyncStep1 より先に届く)．
+      this.suppressUpload = false;
       this.setStatus('connected');
       this.sendSyncStep1();
       this.broadcastAwareness();
@@ -305,7 +325,14 @@ export class YjsWebsocketProvider {
         cardsAfter: afterCards,
       });
       if (encoding.length(reply) > 1) {
-        this.send(encoding.toUint8Array(reply));
+        // v0.2.16: epoch 不一致のときはアップロードを抑止 (download-only)．
+        // この reply は「サーバーが欠いている操作」= 古い lineage のローカル
+        // キャッシュ全体 (例の 2.6 MB)．これを送ると肥大化が再発する．
+        if (this.suppressUpload) {
+          console.warn('[provider] epoch mismatch — suppressing upload (download-only)');
+        } else {
+          this.send(encoding.toUint8Array(reply));
+        }
       }
       // SyncStep2 (=1) means the server has just sent us its full state — we're synced
       if (msgType === syncProtocol.messageYjsSyncStep2 && !this.synced) {
@@ -331,12 +358,17 @@ export class YjsWebsocketProvider {
           strict?: boolean;
           serverVersion?: string;
           matchedRule?: string;
+          docEpoch?: string | null;
           upgradeRecommended?: {
             reason: string;
             message: string;
             downloadHint?: string;
           };
         };
+        // v0.2.16: docEpoch を評価．サーバーの SyncStep1 reply (= upload) を
+        // 計算する前にここで suppressUpload を同期的に決定できる
+        // (KJ_META は SyncStep1 より先に届く)．
+        this.evaluateEpoch(meta.docEpoch ?? null);
         if (meta.kind === 'role-assigned' && meta.role) {
           this.emit({
             type: 'role-assigned',
@@ -361,9 +393,29 @@ export class YjsWebsocketProvider {
     }
   }
 
+  /** v0.2.16: サーバーの docEpoch を保存済 expectedEpoch と突き合わせる．
+   *  - server null (epoch 非対応サーバー): 何もしない (旧挙動)．
+   *  - expected null (キャッシュ無し / 初回): 抑止せず．SyncManager が同期後に保存．
+   *  - 一致: 抑止せず (オフライン編集のマージを保持)．
+   *  - 不一致: suppressUpload を立て，matched=false で emit (SyncManager が
+   *    キャッシュ破棄 + clean 再接続)． */
+  private evaluateEpoch(serverEpoch: string | null): void {
+    this.serverEpoch = serverEpoch;
+    const expected = this.opts.expectedEpoch ?? null;
+    let matched = true;
+    if (serverEpoch !== null && expected !== null && serverEpoch !== expected) {
+      matched = false;
+      this.suppressUpload = true;
+    }
+    this.emit({ type: 'epoch', serverEpoch, expected, matched });
+  }
+
   private handleLocalDocUpdate = (update: Uint8Array, origin: unknown) => {
     // Don't echo server-sourced updates back to the server.
     if (origin === this) return;
+    // v0.2.16: epoch 不一致中はローカル変更も送らない (SyncManager が直後に
+    // キャッシュ破棄 + clean 再接続する．それまでの過渡的な書き込みを抑止)．
+    if (this.suppressUpload) return;
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const enc = encoding.createEncoder();
     encoding.writeVarUint(enc, MESSAGE_SYNC);

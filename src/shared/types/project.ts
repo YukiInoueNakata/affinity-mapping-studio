@@ -28,7 +28,8 @@ export interface Snapshot {
   data: ProjectData;
 }
 
-export const APP_VERSION = '0.5.0';
+/** Single source of truth = package.json `version`, injected via Vite `define`. */
+export const APP_VERSION = __APP_VERSION__;
 
 export const INITIAL_ANALYSIS_METHODS = [
   { kind: 'kj' as const, name: 'KJ法' },

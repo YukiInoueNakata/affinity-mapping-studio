@@ -383,6 +383,16 @@ body[data-kj-role="viewer"] .group-label-input {
 .app-title {
   font-weight: 600;
   color: var(--text-muted);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.app-version {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.65;
 }
 
 .app-toolbar {

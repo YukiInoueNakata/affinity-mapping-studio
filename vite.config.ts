@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
+
+const pkg = createRequire(import.meta.url)('./package.json') as { version: string };
 
 // kj-studio is the single "KJ Trace Studio" client.  Realtime sync (Yjs /
 // WebSocket) is always compiled in but stays dormant until the user connects
@@ -16,6 +19,7 @@ export default defineConfig({
   envPrefix: ['VITE_', 'TAURI_'],
   define: {
     __INCLUDE_SYNC__: 'true',
+    __APP_VERSION__: JSON.stringify(pkg.version),
   },
   resolve: {
     alias: {

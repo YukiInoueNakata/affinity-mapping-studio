@@ -458,6 +458,12 @@ export interface DisplaySettings {
   groupFontSize?: number;
   /** KJ キャンバスの地の色．未指定なら白 (#ffffff)． */
   canvasBackground?: string;
+  /** グループ化時にメンバーカードを自動でグリッド整列する．未指定は ON 扱い． */
+  autoPackOnGroup?: boolean;
+  /** 自動整列の方向．'cols' = 列数を基準, 'rows' = 行数を基準．既定 'cols'． */
+  autoPackOrientation?: 'cols' | 'rows';
+  /** 列数 (cols) または行数 (rows) の固定値．未指定なら √n の自動決定． */
+  autoPackCount?: number;
 }
 
 export interface ProjectMetadata {

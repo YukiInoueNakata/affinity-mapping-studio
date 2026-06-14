@@ -1476,10 +1476,18 @@ export function makeCreateGroupCommand(
   label: Label,
   position: GroupPosition,
   memberships: GroupMembership[],
-  replacedMemberships: GroupMembership[] = []
+  replacedMemberships: GroupMembership[] = [],
+  /** グループ化と同時にメンバーカードを自動整列するための移動 (undo は 1 操作に統合)． */
+  cardMoves: Array<{
+    cardId: string;
+    from: { x: number; y: number };
+    to: { x: number; y: number };
+  }> = []
 ): DomainCommand {
   const newMembershipIds = new Set(memberships.map((m) => m.id));
   const replacedIds = new Set(replacedMemberships.map((m) => m.id));
+  const moveTo = new Map(cardMoves.map((m) => [m.cardId, m.to]));
+  const moveFrom = new Map(cardMoves.map((m) => [m.cardId, m.from]));
   return {
     label: `グループ作成: ${group.name}`,
     apply: (d) => ({
@@ -1491,6 +1499,9 @@ export function makeCreateGroupCommand(
         ...d.group_memberships.filter((m) => !replacedIds.has(m.id)),
         ...memberships,
       ],
+      card_positions: d.card_positions.map((p) =>
+        moveTo.has(p.cardId) ? { ...p, ...moveTo.get(p.cardId)! } : p
+      ),
     }),
     revert: (d) => ({
       ...d,
@@ -1501,6 +1512,9 @@ export function makeCreateGroupCommand(
         ...d.group_memberships.filter((m) => !newMembershipIds.has(m.id)),
         ...replacedMemberships,
       ],
+      card_positions: d.card_positions.map((p) =>
+        moveFrom.has(p.cardId) ? { ...p, ...moveFrom.get(p.cardId)! } : p
+      ),
     }),
   };
 }

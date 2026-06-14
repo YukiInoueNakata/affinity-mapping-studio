@@ -211,7 +211,7 @@ function CanvasViewImpl() {
   }, [nodes]);
   const [contextMenu, setContextMenu] = useState<
     | { kind: 'card'; x: number; y: number; cardId: string }
-    | { kind: 'group'; x: number; y: number; groupId: string }
+    | { kind: 'group'; x: number; y: number; groupId: string; cardIds: string[] }
     | null
   >(null);
   const [splitCardId, setSplitCardId] = useState<string | null>(null);
@@ -570,11 +570,19 @@ function CanvasViewImpl() {
         setContextMenu({ kind: 'card', x: e.clientX, y: e.clientY, cardId: node.id });
         selectCard(node.id);
       } else if (node.type === 'kjgroup') {
-        setContextMenu({ kind: 'group', x: e.clientX, y: e.clientY, groupId: node.id });
+        // selectGroup(node.id) はカード選択をクリアするため，右クリック時点で
+        // 選択中だったカードを退避し，「このグループへ編入」メニューで使う．
+        setContextMenu({
+          kind: 'group',
+          x: e.clientX,
+          y: e.clientY,
+          groupId: node.id,
+          cardIds: [...selectedCardIds],
+        });
         selectGroup(node.id);
       }
     },
-    [selectCard, selectGroup]
+    [selectCard, selectGroup, selectedCardIds]
   );
 
   const changePlacement = useCallback(
@@ -809,6 +817,52 @@ function CanvasViewImpl() {
       setContextMenu(null);
     },
     [project, applyCommand, getMeasuredSizes]
+  );
+
+  // 選択中のカード群を既存グループへ編入する．トグル無関係で，グループ枠 (と祖先) を
+  // 新メンバーを含めて再フィットする．ツールバーの混在選択と右クリックメニューの
+  // 両方から呼ぶ．
+  const incorporateCardsIntoGroup = useCallback(
+    (targetGroupId: string, cardIds: string[]) => {
+      if (!project || cardIds.length === 0) return;
+      const now = new Date().toISOString();
+      const replaced: GroupMembership[] = [];
+      const added: GroupMembership[] = [];
+      for (const cid of cardIds) {
+        const existing = project.data.group_memberships.find((m) => m.cardId === cid);
+        if (existing && existing.groupId === targetGroupId) continue;
+        if (existing) replaced.push(existing);
+        added.push({ id: newId(), cardId: cid, groupId: targetGroupId, createdAt: now });
+      }
+      if (added.length === 0) return;
+      const cardOverrides = new Map(
+        cardIds
+          .map((cid) => project.data.card_positions.find((p) => p.cardId === cid))
+          .filter((p): p is NonNullable<typeof p> => !!p)
+          .map((p) => [p.cardId, { x: p.x, y: p.y }] as const)
+      );
+      const synthesizedData = {
+        ...project.data,
+        group_memberships: [
+          ...project.data.group_memberships.filter(
+            (m) => !replaced.some((r) => r.id === m.id)
+          ),
+          ...added,
+        ],
+      };
+      const cardWrapWidth = project.metadata.displaySettings?.cardWrapWidth;
+      const groupBoundsUpdates = computeCascadedGroupBoundsUpdates(
+        synthesizedData,
+        cardOverrides,
+        new Map(),
+        { defaultCardWidth: cardWrapWidth, measuredSizes: getMeasuredSizes() }
+      );
+      applyCommand(
+        makeAddCardsToGroupCommand(targetGroupId, added, replaced, groupBoundsUpdates)
+      );
+      selectGroup(targetGroupId);
+    },
+    [project, applyCommand, selectGroup, getMeasuredSizes]
   );
 
   const unnestFromParent = useCallback(
@@ -1196,54 +1250,17 @@ function CanvasViewImpl() {
     if (!project || selectedCardIds.length === 0) return;
     const now = new Date().toISOString();
 
-    // Mixed selection: cards + exactly one group → add cards to that group.
-    // Read React Flow's current selected nodes (not just selectedCardIds,
-    // because the store collapses to one selection bucket).
-    const selectedGroupNodeIds = nodes
-      .filter((n) => n.selected && n.type === 'kjgroup')
-      .map((n) => n.id);
+    // Mixed selection: cards + exactly one group → 既存グループへ編入．
+    // React Flow のノード選択が不安定な場合に備え, ストアの selectedGroupIds も参照する．
+    const selectedGroupNodeIds = (() => {
+      const fromNodes = nodes
+        .filter((n) => n.selected && n.type === 'kjgroup')
+        .map((n) => n.id);
+      return fromNodes.length > 0 ? fromNodes : selectedGroupIds;
+    })();
 
     if (selectedGroupNodeIds.length === 1) {
-      const targetGroupId = selectedGroupNodeIds[0];
-      const replaced: GroupMembership[] = [];
-      const added: GroupMembership[] = [];
-      for (const cid of selectedCardIds) {
-        const existing = project.data.group_memberships.find((m) => m.cardId === cid);
-        if (existing && existing.groupId === targetGroupId) continue;
-        if (existing) replaced.push(existing);
-        added.push({ id: newId(), cardId: cid, groupId: targetGroupId, createdAt: now });
-      }
-      if (added.length === 0) return;
-      // Auto-fit the target group (and ancestors) with the new members.
-      const cardOverrides = new Map(
-        selectedCardIds
-          .map((cid) => project.data.card_positions.find((p) => p.cardId === cid))
-          .filter((p): p is NonNullable<typeof p> => !!p)
-          .map((p) => [p.cardId, { x: p.x, y: p.y }] as const)
-      );
-      // Synthesize what data will look like AFTER the membership add, so
-      // computeCascadedGroupBoundsUpdates includes the new cards in the
-      // target group's bounding box.
-      const synthesizedData = {
-        ...project.data,
-        group_memberships: [
-          ...project.data.group_memberships.filter(
-            (m) => !replaced.some((r) => r.id === m.id)
-          ),
-          ...added,
-        ],
-      };
-      const cardWrapWidth = project.metadata.displaySettings?.cardWrapWidth;
-      const groupBoundsUpdates = computeCascadedGroupBoundsUpdates(
-        synthesizedData,
-        cardOverrides,
-        new Map(),
-        { defaultCardWidth: cardWrapWidth, measuredSizes: getMeasuredSizes() }
-      );
-      applyCommand(
-        makeAddCardsToGroupCommand(targetGroupId, added, replaced, groupBoundsUpdates)
-      );
-      selectGroup(targetGroupId);
+      incorporateCardsIntoGroup(selectedGroupNodeIds[0], selectedCardIds);
       return;
     }
 
@@ -1276,22 +1293,81 @@ function CanvasViewImpl() {
       defaultCardWidth: cardWrapWidth,
     });
     const position = fitted ? { groupId: out.group.id, ...fitted } : out.position;
+
+    // (#2) グループ化と同時にメンバーカードを自動整列する (既定 ON)．方向と列/行数は
+    // 表示設定で変更できる．整列後に枠を再フィットし, カード移動はグループ作成コマンドへ
+    // 統合して 1 回の undo で戻せるようにする．
+    const ds = project.metadata.displaySettings;
+    const autoPack = ds?.autoPackOnGroup !== false;
+    let cardMoves: Array<{
+      cardId: string;
+      from: { x: number; y: number };
+      to: { x: number; y: number };
+    }> = [];
+    let finalPosition = position;
+    if (autoPack) {
+      const packSynth = {
+        ...synthesized,
+        group_positions: [...project.data.group_positions, position],
+      };
+      const packed = packGroupCards(packSynth, out.group.id, {
+        measuredSizes: getMeasuredSizes(),
+        defaultCardWidth: cardWrapWidth,
+        orientation: ds?.autoPackOrientation ?? 'cols',
+        count: ds?.autoPackCount,
+      });
+      if (packed && packed.cardTargets.length > 0) {
+        cardMoves = packed.cardTargets
+          .map((t) => {
+            const cur = project.data.card_positions.find((p) => p.cardId === t.cardId);
+            if (!cur) return null;
+            if (cur.x === t.x && cur.y === t.y) return null;
+            return { cardId: t.cardId, from: { x: cur.x, y: cur.y }, to: { x: t.x, y: t.y } };
+          })
+          .filter(
+            (m): m is { cardId: string; from: { x: number; y: number }; to: { x: number; y: number } } =>
+              m !== null
+          );
+        const packedOverride = new Map(
+          packed.cardTargets.map((t) => [t.cardId, { x: t.x, y: t.y }] as const)
+        );
+        const refit = computeGroupAutoBounds(packSynth, out.group.id, {
+          cardPosOverride: packedOverride,
+          measuredSizes: getMeasuredSizes(),
+          defaultCardWidth: cardWrapWidth,
+        });
+        if (refit) finalPosition = { groupId: out.group.id, ...refit };
+      }
+    }
     applyCommand(
       makeCreateGroupCommand(
         out.group,
         out.label,
-        position,
+        finalPosition,
         out.memberships,
-        out.conflictingMemberships
+        out.conflictingMemberships,
+        cardMoves
       )
     );
     selectGroup(out.group.id);
-  }, [project, selectedCardIds, nodes, applyCommand, selectGroup, getMeasuredSizes]);
+  }, [
+    project,
+    selectedCardIds,
+    selectedGroupIds,
+    nodes,
+    applyCommand,
+    selectGroup,
+    getMeasuredSizes,
+    incorporateCardsIntoGroup,
+  ]);
 
   // Selection of a single group + cards changes the group button into
   // "add cards to that group" mode.
   const targetExistingGroupId = (() => {
-    const ids = nodes.filter((n) => n.selected && n.type === 'kjgroup').map((n) => n.id);
+    const fromNodes = nodes
+      .filter((n) => n.selected && n.type === 'kjgroup')
+      .map((n) => n.id);
+    const ids = fromNodes.length > 0 ? fromNodes : selectedGroupIds;
     return ids.length === 1 && selectedCardIds.length > 0 ? ids[0] : null;
   })();
   const canMakeGroup = selectedCardIds.length >= 1;
@@ -1508,6 +1584,21 @@ function CanvasViewImpl() {
             const g = project?.data.groups.find((x) => x.id === contextMenu.groupId);
             return (
               <>
+                {contextMenu.cardIds.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        incorporateCardsIntoGroup(contextMenu.groupId, contextMenu.cardIds);
+                        setContextMenu(null);
+                      }}
+                      title="右クリック直前に選択していたカードをこのグループへ編入する"
+                    >
+                      選択中のカードをこのグループへ編入 ({contextMenu.cardIds.length} 枚)
+                    </button>
+                    <div className="card-context-menu-sep" />
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={() => alignGroupToLabel(contextMenu.groupId)}

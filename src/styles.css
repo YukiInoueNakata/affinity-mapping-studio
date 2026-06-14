@@ -716,7 +716,7 @@ body[data-kj-role="viewer"] .group-label-input {
  *  - 横方向は word-break で折り返して隠れないようにする
  *  - セクション間の手動リサイズは無効
  */
-.right-panel .panel-section {
+.right-panel .panel-section:not(.panel-section-grow):not(.search-section) {
   resize: none;
   height: auto;
   max-height: none;
@@ -3090,15 +3090,24 @@ mark.search-match {
 
 /* react flow overrides */
 .react-flow__controls {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
+  background: #fff;
+  border: 1px solid #000;
   border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
 .react-flow__controls button {
-  background: var(--bg-elev);
-  border-bottom: 1px solid var(--border);
-  color: var(--text);
+  background: #fff;
+  border-bottom: 1px solid #000;
+  color: #000;
+}
+
+.react-flow__controls button svg {
+  fill: #000;
+}
+
+.react-flow__controls button:hover {
+  background: #e8e8e8;
 }
 
 .react-flow__minimap {

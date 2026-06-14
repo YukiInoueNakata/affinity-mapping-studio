@@ -14,6 +14,9 @@ const DEFAULTS = {
   cardFontSize: 12,
   groupFontSize: 12,
   canvasBackground: '#ffffff',
+  autoPackOnGroup: true,
+  autoPackOrientation: 'cols' as 'cols' | 'rows',
+  autoPackCount: 0, // 0 = 自動 (√n)
 };
 
 export function DisplaySettingsDialog({ open, onClose }: Props) {
@@ -35,6 +38,15 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
   const [canvasBackground, setCanvasBackground] = useState<string>(
     current?.canvasBackground ?? DEFAULTS.canvasBackground
   );
+  const [autoPackOnGroup, setAutoPackOnGroup] = useState<boolean>(
+    current?.autoPackOnGroup ?? DEFAULTS.autoPackOnGroup
+  );
+  const [autoPackOrientation, setAutoPackOrientation] = useState<'cols' | 'rows'>(
+    current?.autoPackOrientation ?? DEFAULTS.autoPackOrientation
+  );
+  const [autoPackCount, setAutoPackCount] = useState<number>(
+    current?.autoPackCount ?? DEFAULTS.autoPackCount
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -43,6 +55,9 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
     setCardFontSize(current?.cardFontSize ?? DEFAULTS.cardFontSize);
     setGroupFontSize(current?.groupFontSize ?? DEFAULTS.groupFontSize);
     setCanvasBackground(current?.canvasBackground ?? DEFAULTS.canvasBackground);
+    setAutoPackOnGroup(current?.autoPackOnGroup ?? DEFAULTS.autoPackOnGroup);
+    setAutoPackOrientation(current?.autoPackOrientation ?? DEFAULTS.autoPackOrientation);
+    setAutoPackCount(current?.autoPackCount ?? DEFAULTS.autoPackCount);
   }, [open, current]);
 
   if (!open) return null;
@@ -54,6 +69,9 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
       cardFontSize,
       groupFontSize,
       canvasBackground,
+      autoPackOnGroup,
+      autoPackOrientation,
+      autoPackCount: autoPackCount > 0 ? autoPackCount : undefined,
     };
     setDisplaySettings(next);
     onClose();
@@ -134,6 +152,59 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
               onChange={(v) => setCanvasBackground(v ?? DEFAULTS.canvasBackground)}
               showCustom
             />
+          </fieldset>
+          <fieldset
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '120px 1fr',
+              gap: 8,
+              alignItems: 'center',
+              padding: 8,
+              border: '1px solid var(--border)',
+              borderRadius: 3,
+              marginTop: 4,
+            }}
+          >
+            <legend className="muted small">グループ化時の自動整列</legend>
+            <label htmlFor="autoPackOnGroup">自動整列</label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                id="autoPackOnGroup"
+                type="checkbox"
+                checked={autoPackOnGroup}
+                onChange={(e) => setAutoPackOnGroup(e.target.checked)}
+              />
+              <span className="muted small">
+                グループ化したときにカードをグリッド整列する（標準: ON）
+              </span>
+            </label>
+            <label htmlFor="autoPackOrientation">並べ方向</label>
+            <select
+              id="autoPackOrientation"
+              value={autoPackOrientation}
+              disabled={!autoPackOnGroup}
+              onChange={(e) =>
+                setAutoPackOrientation(e.target.value === 'rows' ? 'rows' : 'cols')
+              }
+            >
+              <option value="cols">列方向（列数を基準）</option>
+              <option value="rows">行方向（行数を基準）</option>
+            </select>
+            <label htmlFor="autoPackCount">
+              {autoPackOrientation === 'rows' ? '行数' : '列数'}
+            </label>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                id="autoPackCount"
+                type="number"
+                min={0}
+                max={20}
+                value={autoPackCount}
+                disabled={!autoPackOnGroup}
+                onChange={(e) => setAutoPackCount(Number(e.target.value))}
+              />
+              <span className="muted small">0 = 自動（√n でほぼ正方形）</span>
+            </span>
           </fieldset>
         </div>
         <footer className="modal-footer">

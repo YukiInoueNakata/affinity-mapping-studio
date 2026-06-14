@@ -408,6 +408,10 @@ export interface PackGroupCardsOptions {
   defaultCardHeight?: number;
   /** Gap between packed cards (px). */
   gap?: number;
+  /** 列基準 ('cols') か行基準 ('rows') か．既定 'cols'． */
+  orientation?: 'cols' | 'rows';
+  /** 列数 (orientation='cols') または行数 (orientation='rows') の固定値．未指定は √n 自動． */
+  count?: number;
 }
 
 /**
@@ -455,7 +459,20 @@ export function packGroupCards(
   items.sort((a, b) => (Math.abs(a.y - b.y) > 20 ? a.y - b.y : a.x - b.x));
 
   const n = items.length;
-  const cols = Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n))));
+  // 列数を決定する．orientation='cols' なら count を列数として，'rows' なら count を
+  // 行数として扱い列数を逆算する．count 未指定時は √n でおおよそ正方形に整える．
+  const orientation = options.orientation ?? 'cols';
+  const fixed =
+    options.count && options.count > 0 ? Math.floor(options.count) : undefined;
+  const autoBase = Math.ceil(Math.sqrt(n));
+  let cols: number;
+  if (orientation === 'rows') {
+    const rows = Math.max(1, Math.min(n, fixed ?? autoBase));
+    cols = Math.ceil(n / rows);
+  } else {
+    cols = fixed ?? autoBase;
+  }
+  cols = Math.max(1, Math.min(n, cols));
   const colWidth = Math.max(...items.map((it) => it.w));
 
   const startX = pos.x + GROUP_AUTOFIT_PADDING;

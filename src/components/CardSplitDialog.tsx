@@ -213,6 +213,9 @@ export function CardSplitDialog({ open, card, onClose, onConfirm }: Props) {
               </button>
               <button
                 type="button"
+                // Keep the textarea focused so ta.selectionStart survives the
+                // click (WKWebView/Safari collapses the selection on blur).
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={handleInsertAtCursor}
                 title={
                   focused

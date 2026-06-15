@@ -17,7 +17,7 @@ export function SourceWindow() {
     return (
       <div className="app-root">
         <header className="app-header">
-          <div className="app-title">原文ビューア — KJ Trace Studio</div>
+          <div className="app-title">原文ビューア — Affinity Mapping Studio</div>
         </header>
         <main className="app-main">
           <div className="empty-state">

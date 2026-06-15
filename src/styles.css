@@ -3088,26 +3088,30 @@ mark.search-match {
   font-size: 11px;
 }
 
-/* react flow overrides */
+/* react flow overrides — force white bg / black border / black icons for
+ * visibility (default React Flow #fefefe + our old var(--bg-elev) looked gray) */
 .react-flow__controls {
-  background: #fff;
+  background: #fff !important;
   border: 1px solid #000;
   border-radius: 4px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
-.react-flow__controls button {
-  background: #fff;
+.react-flow__controls button,
+.react-flow__controls-button {
+  background: #fff !important;
   border-bottom: 1px solid #000;
   color: #000;
 }
 
-.react-flow__controls button svg {
-  fill: #000;
+.react-flow__controls button svg,
+.react-flow__controls-button svg {
+  fill: #000 !important;
 }
 
-.react-flow__controls button:hover {
-  background: #e8e8e8;
+.react-flow__controls button:hover,
+.react-flow__controls-button:hover {
+  background: #f0f0f0 !important;
 }
 
 .react-flow__minimap {

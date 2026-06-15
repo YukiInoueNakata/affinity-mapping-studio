@@ -1065,8 +1065,8 @@ export function App() {
           : 'status-saved';
 
   const title = project
-    ? `${project.metadata.name}${isDirty ? ' *' : ''} — KJ Trace Studio`
-    : 'KJ Trace Studio';
+    ? `${project.metadata.name}${isDirty ? ' *' : ''} — Affinity Mapping Studio`
+    : 'Affinity Mapping Studio';
   useEffect(() => {
     document.title = title;
   }, [title]);
@@ -1077,7 +1077,7 @@ export function App() {
         <div className="ribbon-row-1">
           <div className="app-title">
             {title}
-            <span className="app-version" title={`KJ Trace Studio v${__APP_VERSION__}`}>
+            <span className="app-version" title={`Affinity Mapping Studio v${__APP_VERSION__}`}>
               v{__APP_VERSION__}
             </span>
           </div>
@@ -1974,7 +1974,7 @@ export function App() {
           )
         ) : (
           <div className="welcome">
-            <h1>KJ Trace Studio</h1>
+            <h1>Affinity Mapping Studio</h1>
             <p>プロジェクトを新規作成するか、既存のファイルを開いてください。</p>
             <div className="welcome-actions">
               <button type="button" className="primary" onClick={onNew}>新規プロジェクト</button>

@@ -60,7 +60,7 @@ export function formatRecentErrors(): string {
   if (buffer.length === 0) return '(エラー記録なし)';
   const platform = navigator.userAgent;
   const lines: string[] = [
-    `# KJ Trace Studio 診断ログ`,
+    `# Affinity Mapping Studio 診断ログ`,
     `生成日時: ${new Date().toISOString()}`,
     `Platform: ${platform}`,
     `エラー件数: ${buffer.length}`,

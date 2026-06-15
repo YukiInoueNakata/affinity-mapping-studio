@@ -1,8 +1,8 @@
 {
-  "name": "kj-studio",
+  "name": "affinity-mapping-studio",
   "private": true,
-  "version": "0.2.16",
-  "description": "KJ Trace Studio (Tauri 統合版).",
+  "version": "0.2.17",
+  "description": "Affinity Mapping Studio (Tauri 統合版).",
   "type": "module",
   "scripts": {
     "dev": "vite",

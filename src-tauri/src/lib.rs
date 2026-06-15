@@ -23,7 +23,7 @@ use tauri::{AppHandle, Runtime};
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!(
-        "Hello from Rust (kj-trace-tauri v{})! Greetings, {}.",
+        "Hello from Rust (affinity-mapping-tauri v{})! Greetings, {}.",
         env!("CARGO_PKG_VERSION"),
         name
     )

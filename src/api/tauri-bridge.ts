@@ -40,7 +40,7 @@ interface ProjectPayload {
 }
 
 const KJPROJ_FILTERS: DialogFilter[] = [
-  { name: 'KJ Trace Project', extensions: ['kjproj'] },
+  { name: 'Affinity Mapping Project', extensions: ['kjproj'] },
 ];
 
 // ---- helpers -------------------------------------------------------------
@@ -235,7 +235,7 @@ const api: IpcApi = {
     // (see main.tsx).  Hash routing is unreliable across new WebviewWindow.
     const win = new WebviewWindow(label, {
       url: '/',
-      title: '原文ビューア — KJ Trace Studio',
+      title: '原文ビューア — Affinity Mapping Studio',
       width: 900,
       height: 700,
     });

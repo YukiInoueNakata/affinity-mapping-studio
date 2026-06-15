@@ -15,13 +15,13 @@ import './styles.css';
 // 早期のエラーも捕捉．
 installErrorBuffer();
 
-// ウィンドウタイトルを「KJ Studio v0.x.y」形式に動的設定．
-// 旧名「KJ Trace Studio」を「KJ Studio」へ変更 (2026-06-02)．
+// ウィンドウタイトルを「Affinity Mapping Studio v0.x.y」形式に動的設定．
+// 商標配慮のため表示名を「KJ Studio」→「Affinity Mapping Studio」へ変更 (2026-06-15)．
 (async () => {
   try {
     const v = await getVersion();
     const win = getCurrentWebviewWindow();
-    const base = win.label === 'source' ? 'KJ Studio — 原文ビューア' : 'KJ Studio';
+    const base = win.label === 'source' ? 'Affinity Mapping Studio — 原文ビューア' : 'Affinity Mapping Studio';
     await win.setTitle(`${base} v${v}`);
   } catch (e) {
     console.warn('setTitle failed', e);

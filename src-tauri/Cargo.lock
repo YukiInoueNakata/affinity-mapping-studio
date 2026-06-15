@@ -9,6 +9,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "affinity-mapping-tauri"
+version = "0.2.17"
+dependencies = [
+ "calamine",
+ "csv",
+ "docx-rs",
+ "encoding_rs",
+ "regex",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tokio",
+ "zip 2.4.2",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1788,24 +1806,6 @@ dependencies = [
  "bitflags 2.11.1",
  "serde",
  "unicode-segmentation",
-]
-
-[[package]]
-name = "kj-trace-tauri"
-version = "0.2.15"
-dependencies = [
- "calamine",
- "csv",
- "docx-rs",
- "encoding_rs",
- "regex",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tokio",
- "zip 2.4.2",
 ]
 
 [[package]]

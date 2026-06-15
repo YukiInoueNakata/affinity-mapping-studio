@@ -1,4 +1,4 @@
-name: Build (macOS DMG + Windows MSI)
+name: Build Affinity Mapping Studio (macOS DMG + Windows MSI)
 
 on:
   # Trigger on tag push (e.g., `git push origin v0.2.0`).
@@ -67,16 +67,16 @@ jobs:
           draft: true
           name: ${{ github.ref_name }}
           body: |
-            **KJ Trace Studio** ${{ github.ref_name }}
+            **Affinity Mapping Studio** ${{ github.ref_name }}
 
             Tauri 単一クライアント (sync 常時込み・実行時オプトイン)．
             無署名 (private build)．
 
             ## macOS (Universal DMG)
 
-            1. Finder で DMG をマウント → `KJ Trace Studio.app` を `/Applications` へドラッグ
+            1. Finder で DMG をマウント → `Affinity Mapping Studio.app` を `/Applications` へドラッグ
             2. 初回起動: Finder で `.app` を **右クリック → 開く**，ダイアログで「開く」
-            3. もしくは Terminal で `xattr -d com.apple.quarantine /Applications/KJ\ Trace\ Studio.app`
+            3. もしくは Terminal で `xattr -d com.apple.quarantine /Applications/Affinity\ Mapping\ Studio.app`
 
             ## Windows (MSI)
 

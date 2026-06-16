@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as Y from 'yjs';
 import type { ProjectData } from '@shared/types/domain';
 import {
@@ -273,6 +273,295 @@ describe('YjsSyncBridge — observe filters local vs remote', () => {
     expect(ids).toContain('cRemote');
 
     unsubscribe();
+  });
+});
+
+describe('YjsSyncBridge — applyDiff (incremental mirror)', () => {
+  it('seeds an empty doc and round-trips all tables', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.applyDiff(sampleData());
+    const out = bridge.toProjectData();
+    expect(out.cards[0].body).toBe('カード本文');
+    expect(out.cards[0].tags).toEqual(['重要']);
+    expect(out.labels[0].sharedMemo).toBe('共有');
+    expect(out.source_segments[0].speaker).toBe('A さん');
+  });
+
+  it('adds new records and removes deleted ones', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.applyDiff(sampleData());
+
+    const next = sampleData();
+    next.cards.push({
+      id: 'c2',
+      participantId: 'p1',
+      code: 'P01-002',
+      serialNumber: 2,
+      body: '追加カード',
+      status: 'active',
+      placement: 'canvas',
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    bridge.applyDiff(next);
+    expect(bridge.toProjectData().cards.map((c) => c.id).sort()).toEqual(['c1', 'c2']);
+
+    const removed = sampleData(); // back to just c1
+    bridge.applyDiff(removed);
+    expect(bridge.toProjectData().cards.map((c) => c.id)).toEqual(['c1']);
+  });
+
+  it('updates a changed scalar field in place', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.applyDiff(sampleData());
+
+    const next = sampleData();
+    next.cards[0].body = '書き換え後';
+    next.cards[0].tags = ['重要', '追加'];
+    bridge.applyDiff(next);
+
+    const out = bridge.toProjectData();
+    expect(out.cards[0].body).toBe('書き換え後');
+    expect(out.cards[0].tags).toEqual(['重要', '追加']);
+  });
+
+  it('edits Y.Text in place (keeps the same instance for concurrent merge)', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.applyDiff(sampleData());
+    const cardsArr = bridge.doc.getMap('tables').get('cards') as Y.Array<Y.Map<unknown>>;
+    const textBefore = cardsArr.get(0).get('body');
+
+    const next = sampleData();
+    next.cards[0].body = 'カード本文を編集';
+    bridge.applyDiff(next);
+
+    const textAfter = cardsArr.get(0).get('body');
+    expect(textAfter).toBeInstanceOf(Y.Text);
+    // Same Y.Text instance is edited, not replaced.
+    expect(textAfter).toBe(textBefore);
+    expect((textAfter as Y.Text).toString()).toBe('カード本文を編集');
+  });
+
+  it('does NOT bloat the doc: many single-field edits stay tiny vs re-seed', () => {
+    // Anti-regression for the giro2026 incident: the old mirror re-seeded the
+    // whole doc each edit, tombstoning everything and growing without bound.
+    const seedBridge = new YjsSyncBridge();
+    const diffBridge = new YjsSyncBridge();
+    const base = sampleData();
+    seedBridge.seedFromProjectData(base);
+    diffBridge.applyDiff(base);
+
+    for (let i = 0; i < 100; i++) {
+      const d = sampleData();
+      d.cards[0].body = `編集 ${i}`;
+      seedBridge.seedFromProjectData(d); // old pathological path
+      diffBridge.applyDiff(d); // new incremental path
+    }
+
+    const seedSize = Y.encodeStateAsUpdate(seedBridge.doc).byteLength;
+    const diffSize = Y.encodeStateAsUpdate(diffBridge.doc).byteLength;
+    // Incremental should be an order of magnitude smaller after 100 edits.
+    expect(diffSize).toBeLessThan(seedSize / 5);
+    // Both still produce identical observable data.
+    expect(diffBridge.toProjectData().cards[0].body).toBe('編集 99');
+  });
+
+  it('two clients converge when both use applyDiff', () => {
+    const a = new YjsSyncBridge();
+    a.applyDiff(sampleData());
+    const b = new YjsSyncBridge();
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc));
+
+    const da = sampleData();
+    da.cards[0].body = 'A 編集';
+    a.applyDiff(da);
+
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc, Y.encodeStateVector(b.doc)));
+    expect(b.toProjectData().cards[0].body).toBe('A 編集');
+  });
+});
+
+describe('YjsSyncBridge — Fix #1: Y.Text minimal diff (prefix/suffix preserved)', () => {
+  it('pure middle insert does not touch the unchanged suffix (concurrent end-append survives)', () => {
+    const a = new YjsSyncBridge();
+    const base = sampleData();
+    base.cards[0].body = 'ABCDEFG';
+    a.applyDiff(base);
+
+    const b = new YjsSyncBridge();
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc));
+
+    // B (a real collaborator) types at the end of the body concurrently.
+    const bText = (b.doc.getMap('tables').get('cards') as Y.Array<Y.Map<unknown>>)
+      .get(0)
+      .get('body') as Y.Text;
+    bText.insert(bText.length, ' [end]');
+
+    // A edits the MIDDLE via applyDiff — prefix 'ABC' + suffix 'DEFG' are common.
+    const da = sampleData();
+    da.cards[0].body = 'ABCXYZDEFG';
+    a.applyDiff(da);
+
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc, Y.encodeStateVector(b.doc)));
+    Y.applyUpdate(a.doc, Y.encodeStateAsUpdate(b.doc, Y.encodeStateVector(a.doc)));
+
+    const merged = (a.doc.getMap('tables').get('cards') as Y.Array<Y.Map<unknown>>)
+      .get(0)
+      .get('body') as Y.Text;
+    // Suffix was never deleted, so B's end-append is preserved after the suffix.
+    expect(merged.toString()).toBe('ABCXYZDEFG [end]');
+  });
+
+  it('middle delete preserves a concurrent edit on the untouched suffix', () => {
+    const a = new YjsSyncBridge();
+    const base = sampleData();
+    base.cards[0].body = 'ABCDEFG';
+    a.applyDiff(base);
+
+    const b = new YjsSyncBridge();
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc));
+    const bText = (b.doc.getMap('tables').get('cards') as Y.Array<Y.Map<unknown>>)
+      .get(0)
+      .get('body') as Y.Text;
+    bText.insert(bText.length, '!'); // append to suffix region
+
+    // A deletes the single char 'D' in the middle (prefix 'ABC', suffix 'EFG').
+    const da = sampleData();
+    da.cards[0].body = 'ABCEFG';
+    a.applyDiff(da);
+
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc, Y.encodeStateVector(b.doc)));
+    Y.applyUpdate(a.doc, Y.encodeStateAsUpdate(b.doc, Y.encodeStateVector(a.doc)));
+
+    const merged = (a.doc.getMap('tables').get('cards') as Y.Array<Y.Map<unknown>>)
+      .get(0)
+      .get('body') as Y.Text;
+    expect(merged.toString()).toBe('ABCEFG!');
+  });
+
+  it('repeated single-char appends grow the doc only marginally (minimal delta)', () => {
+    const bridge = new YjsSyncBridge();
+    const base = sampleData();
+    base.cards[0].body = 'x';
+    bridge.applyDiff(base);
+    const sizeAfterSeed = Y.encodeStateAsUpdate(bridge.doc).byteLength;
+
+    let body = 'x';
+    for (let i = 0; i < 50; i++) {
+      body += 'y';
+      const d = sampleData();
+      d.cards[0].body = body;
+      bridge.applyDiff(d);
+    }
+    const sizeAfterEdits = Y.encodeStateAsUpdate(bridge.doc).byteLength;
+    // 50 single-char appends: a full delete+reinsert each time would tombstone
+    // ~1300 chars.  Minimal diff appends one char each → small linear growth.
+    expect(sizeAfterEdits - sizeAfterSeed).toBeLessThan(1000);
+    expect(bridge.toProjectData().cards[0].body).toBe(body);
+  });
+});
+
+describe('YjsSyncBridge — Fix #2: applyDiff hardening', () => {
+  it('canonicalizes a pre-existing duplicate id (keeps first, prunes the rest)', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.applyDiff(sampleData());
+    const cardsArr = bridge.doc.getMap('tables').get('cards') as Y.Array<Y.Map<unknown>>;
+    const dup = new Y.Map<unknown>();
+    dup.set('id', 'c1');
+    dup.set('body', '重複');
+    cardsArr.push([dup]);
+    expect(cardsArr.length).toBe(2);
+
+    bridge.applyDiff(sampleData()); // next still has a single c1
+    expect(cardsArr.length).toBe(1);
+    expect(bridge.toProjectData().cards.map((c) => c.id)).toEqual(['c1']);
+    expect(bridge.toProjectData().cards[0].body).toBe('カード本文');
+  });
+
+  it('prunes id-less garbage rows already in the doc', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.applyDiff(sampleData());
+    const cardsArr = bridge.doc.getMap('tables').get('cards') as Y.Array<Y.Map<unknown>>;
+    const garbage = new Y.Map<unknown>();
+    garbage.set('body', 'id 無し');
+    cardsArr.push([garbage]);
+    expect(cardsArr.length).toBe(2);
+
+    bridge.applyDiff(sampleData());
+    expect(cardsArr.length).toBe(1);
+    expect(bridge.toProjectData().cards[0].id).toBe('c1');
+  });
+
+  it('rejects an id-less incoming record (does not insert it)', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.applyDiff(sampleData());
+    const next = sampleData();
+    (next.cards as unknown as Array<Record<string, unknown>>).push({ body: 'id 無し追加', status: 'active' });
+    bridge.applyDiff(next as unknown as ProjectData);
+    expect(bridge.toProjectData().cards.map((c) => c.id)).toEqual(['c1']);
+  });
+
+  it('syncs metadata deletions (removed keys disappear from the doc)', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.applyDiff(sampleData(), { title: 'プロジェクト', note: '一時メモ' } as unknown as import('@shared/types/domain').ProjectMetadata);
+    expect(bridge.toMetadata()).toMatchObject({ title: 'プロジェクト', note: '一時メモ' });
+
+    bridge.applyDiff(sampleData(), { title: 'プロジェクト' } as unknown as import('@shared/types/domain').ProjectMetadata);
+    const md = bridge.toMetadata() as unknown as Record<string, unknown>;
+    expect(md?.title).toBe('プロジェクト');
+    expect(md && 'note' in md).toBe(false);
+  });
+});
+
+describe('YjsSyncBridge — Codex-W4: garbage drop visibility', () => {
+  it('warns when a stored duplicate-id row is pruned', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.applyDiff(sampleData());
+    const cardsArr = bridge.doc.getMap('tables').get('cards') as Y.Array<Y.Map<unknown>>;
+    const dup = new Y.Map<unknown>();
+    dup.set('id', 'c1');
+    dup.set('body', '重複');
+    cardsArr.push([dup]);
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    bridge.applyDiff(sampleData());
+    const calls = warn.mock.calls.map((c) => String(c[0]));
+    warn.mockRestore();
+
+    expect(calls.length).toBeGreaterThan(0);
+    const msg = calls.join('\n');
+    expect(msg).toContain('table=cards');
+    expect(msg).toContain('dup=1');
+  });
+
+  it('warns when an id-less incoming record is rejected', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.applyDiff(sampleData());
+    const next = sampleData();
+    (next.cards as unknown as Array<Record<string, unknown>>).push({ body: 'id 無し追加', status: 'active' });
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    bridge.applyDiff(next as unknown as ProjectData);
+    const calls = warn.mock.calls.map((c) => String(c[0]));
+    warn.mockRestore();
+
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.join('\n')).toContain('idless=1');
+  });
+
+  it('does NOT warn for a legitimate deletion (id removed from next)', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.applyDiff(sampleData()); // has c1
+    const next = sampleData();
+    next.cards = []; // legitimately remove c1
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    bridge.applyDiff(next);
+    const callCount = warn.mock.calls.length;
+    warn.mockRestore();
+
+    expect(callCount).toBe(0);
+    expect(bridge.toProjectData().cards).toHaveLength(0);
   });
 });
 

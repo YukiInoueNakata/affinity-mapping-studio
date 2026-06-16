@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { makeEmptyProject, type ProjectFile } from '@shared/types/project';
-import type { DisplaySettings, ProjectData } from '@shared/types/domain';
+import type { DisplaySettings, ProjectData, ProjectMetadata } from '@shared/types/domain';
 import type { DomainCommand } from './commands.js';
 import type { YjsSyncBridge } from '../sync/yjsBridge.js';
 
@@ -35,7 +35,7 @@ export function getEditGateRole(): 'viewer' | 'editor' | 'admin' | null {
 /** True when applying a remote-originated update; suppresses re-mirroring. */
 let _applyingRemote = false;
 
-function mirrorToBridge(nextData: ProjectData): void {
+function mirrorToBridge(nextData: ProjectData, metadata?: ProjectMetadata): void {
   if (!_syncBridge || _applyingRemote) {
     console.debug(
       '[sync] mirrorToBridge skipped',
@@ -43,13 +43,12 @@ function mirrorToBridge(nextData: ProjectData): void {
     );
     return;
   }
-  // PoC strategy: bulk replace the bridge's Y.Doc tables with the new
-  // ProjectData inside a single transaction tagged with our localOrigin.
-  // This is heavy (re-creates Y.Map records each call) but correct;
-  // Phase 4b-4 can optimise to incremental diff if perf demands it.
-  _syncBridge.applyLocal(() => {
-    _syncBridge!.seedFromProjectData(nextData);
-  });
+  // Incremental reconcile: touch only changed/added/removed records.  The old
+  // strategy re-seeded the whole Y.Doc each edit (delete-all + insert-all),
+  // which tombstoned the entire document every keystroke and bloated the room
+  // unboundedly (giro2026 grew 3 MB → 205 MB in a few hours, freezing the
+  // renderer on a single card touch).  applyDiff produces a tiny delta instead.
+  _syncBridge.applyDiff(nextData, metadata);
   console.debug('[sync] mirrored to Y.Doc', {
     participants: nextData.participants.length,
     source_segments: nextData.source_segments.length,
@@ -137,8 +136,11 @@ export interface ProjectStoreState {
    *  data (e.g. restored from the local IndexedDB cache): seeding calls
    *  seedFromProjectData which deletes existing table contents, and those
    *  deletes are real CRDT ops that would propagate to the server and wipe
-   *  everyone's data.  Default true preserves the "populate a brand-new empty
-   *  room from my open project" path. */
+   *  everyone's data.  Default is now FALSE (seed only on explicit opt-in):
+   *  the single safe populate-an-empty-room path goes through
+   *  syncManager.uploadProject (guarded by docHasData), so no attach path
+   *  should implicitly seed.  Defaulting off prevents a future caller from
+   *  re-triggering the 2026-06 wipe/bloat incident by forgetting seed:false. */
   attachSyncBridge(
     bridge: YjsSyncBridge | null,
     opts?: { seed?: boolean }
@@ -286,7 +288,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       future: [],
       isDirty: true,
     });
-    mirrorToBridge(nextData);
+    mirrorToBridge(nextData, project.metadata);
   },
 
   undo() {
@@ -301,7 +303,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       future: [...future, command],
       isDirty: true,
     });
-    mirrorToBridge(nextData);
+    mirrorToBridge(nextData, project.metadata);
   },
 
   redo() {
@@ -316,7 +318,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       future: nextFuture,
       isDirty: true,
     });
-    mirrorToBridge(nextData);
+    mirrorToBridge(nextData, project.metadata);
   },
 
   selectCard(cardId) {
@@ -399,19 +401,20 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   setProjectName(name) {
     const { project } = get();
     if (!project) return;
-    set({
-      project: { ...project, metadata: { ...project.metadata, name } },
-      isDirty: true,
-    });
+    // Codex-W2: metadata も同期スキーマの一部．mirrorToBridge を呼ばないと
+    // 名称変更が Y.Doc に伝播せず他クライアントへ届かない．
+    const metadata = { ...project.metadata, name };
+    set({ project: { ...project, metadata }, isDirty: true });
+    mirrorToBridge(project.data, metadata);
   },
 
   setDisplaySettings(settings) {
     const { project } = get();
     if (!project) return;
-    set({
-      project: { ...project, metadata: { ...project.metadata, displaySettings: settings } },
-      isDirty: true,
-    });
+    // Codex-W2: displaySettings の変更も他クライアントへミラーする．
+    const metadata = { ...project.metadata, displaySettings: settings };
+    set({ project: { ...project, metadata }, isDirty: true });
+    mirrorToBridge(project.data, metadata);
   },
 
   addSnapshot(snapshot) {
@@ -460,6 +463,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       selectedGroupIds: [],
       selectedRelationId: null,
     });
+    // Codex-W3: スナップショット復元も他クライアントへミラーする．mirrorToBridge は
+    // applyDiff (差分反映) なので，復元で実際に変化した分だけ Y.Doc に反映され，
+    // 旧来の delete-all + re-add のような全件 tombstone 増殖は起きない．
+    mirrorToBridge(restoredData, project.metadata);
   },
 
   setSnapshots(snapshots) {
@@ -486,7 +493,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     // CRITICAL: skip seeding when the caller says so (opts.seed === false) —
     // see the interface doc.  Seeding over an already-populated Y.Doc would
     // delete its contents and propagate destructive CRDT ops to the server.
-    const seed = opts?.seed !== false;
+    const seed = opts?.seed === true;
     const { project } = get();
     if (seed && project) {
       bridge.applyLocal(() => {
@@ -508,7 +515,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     // Mirror remote-originated changes into the store.  We temporarily set
     // `_applyingRemote = true` so the subsequent set() doesn't bounce back
     // into mirrorToBridge.
-    _unsubscribeRemote = bridge.observe((remoteData) => {
+    _unsubscribeRemote = bridge.observe((remoteData, remoteMeta) => {
       const { project: cur } = get();
       // 2026-06-02 incident デバッグ用ログ．v0.2.8 で原因を絞り込む用．
       console.info('[sync.observe] remote data received', {
@@ -521,8 +528,12 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       _applyingRemote = true;
       try {
         if (cur) {
+          // Codex-W2: remote の metadata 変更 (名称 / displaySettings 等) も反映する．
           set({
-            project: withData(cur, remoteData),
+            project: {
+              ...withData(cur, remoteData),
+              metadata: remoteMeta ? { ...cur.metadata, ...remoteMeta } : cur.metadata,
+            },
             isDirty: true,
           });
           console.info('[sync.observe] store updated (cur branch)', {

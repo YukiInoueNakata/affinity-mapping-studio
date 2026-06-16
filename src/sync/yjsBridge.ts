@@ -96,6 +96,105 @@ function recordToYMap(tableName: TableName, record: Record<string, unknown>): Y.
   return m;
 }
 
+/** Shallow value equality for the scalar/array/object shapes we store in a
+ *  Y.Map field.  Used to skip no-op writes so incremental updates don't add
+ *  needless CRDT operations (and tombstones). */
+function fieldEquals(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!fieldEquals(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const ak = Object.keys(a);
+    const bk = Object.keys(b);
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) {
+      if (!fieldEquals(a[k], (b as Record<string, unknown>)[k])) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/** Reconcile a Y.Text to equal `next` by editing only the changed middle
+ *  span.  Computes the common prefix and suffix between the current string and
+ *  `next`, then deletes/inserts only the differing run in between.
+ *
+ *  Why: the previous implementation deleted the entire string and reinserted
+ *  it on every change.  Yjs keeps deletions as tombstones forever, so a single
+ *  keystroke tombstoned the whole field — over an editing session this is a
+ *  primary CRDT-bloat vector.  Prefix/suffix diffing tombstones only the
+ *  characters that actually changed (usually 0–1 per keystroke). */
+function applyYTextDiff(cur: Y.Text, next: string): void {
+  const curStr = cur.toString();
+  if (curStr === next) return;
+
+  const curLen = curStr.length;
+  const nextLen = next.length;
+  const maxPrefix = Math.min(curLen, nextLen);
+
+  let prefix = 0;
+  while (prefix < maxPrefix && curStr.charCodeAt(prefix) === next.charCodeAt(prefix)) {
+    prefix++;
+  }
+
+  // Common suffix, not overlapping the prefix region on either string.
+  let suffix = 0;
+  const maxSuffix = Math.min(curLen - prefix, nextLen - prefix);
+  while (
+    suffix < maxSuffix &&
+    curStr.charCodeAt(curLen - 1 - suffix) === next.charCodeAt(nextLen - 1 - suffix)
+  ) {
+    suffix++;
+  }
+
+  const delCount = curLen - prefix - suffix; // chars to remove from the middle
+  const insStr = next.slice(prefix, nextLen - suffix); // chars to add in the middle
+
+  if (delCount > 0) cur.delete(prefix, delCount);
+  if (insStr.length > 0) cur.insert(prefix, insStr);
+}
+
+/** Update an existing Y.Map in place to match `record`.  Only fields that
+ *  actually changed are written.  Y.Text fields are edited (not replaced) so
+ *  concurrent character-level edits still merge. */
+function updateYMapFields(
+  tableName: TableName,
+  m: Y.Map<unknown>,
+  record: Record<string, unknown>
+): void {
+  const ytextFields = Y_TEXT_FIELDS[tableName] ?? [];
+  for (const [k, v] of Object.entries(record)) {
+    if (v === undefined) continue;
+    if (ytextFields.includes(k) && typeof v === 'string') {
+      const cur = m.get(k);
+      if (cur instanceof Y.Text) {
+        applyYTextDiff(cur, v);
+      } else {
+        const t = new Y.Text();
+        if (v.length > 0) t.insert(0, v);
+        m.set(k, t);
+      }
+    } else if (v === null) {
+      if (m.get(k) !== null) m.set(k, null);
+    } else if (Array.isArray(v)) {
+      if (!fieldEquals(m.get(k), v)) m.set(k, (v as unknown[]).slice());
+    } else if (isPlainObject(v)) {
+      if (!fieldEquals(m.get(k), v)) m.set(k, cloneShallow(v));
+    } else {
+      if (m.get(k) !== v) m.set(k, v);
+    }
+  }
+  // Remove fields no longer present in the record.
+  for (const k of Array.from(m.keys())) {
+    if (!(k in record)) m.delete(k);
+  }
+}
+
 function yMapToRecord(m: Y.Map<unknown> | Record<string, unknown> | unknown): Record<string, unknown> {
   // 防御 (2026-06-02 incident): サーバー側のスクリプト不具合等で YArray に
   // 素オブジェクトが格納されているケースに備える．素オブジェクトなら shallow
@@ -195,6 +294,129 @@ export class YjsSyncBridge {
     );
   }
 
+  /** Incrementally reconcile the Y.Doc to match `next` ProjectData.
+   *
+   *  Unlike seedFromProjectData (which deletes and recreates every record on
+   *  each call — pathological for the CRDT because deletions become tombstones
+   *  that never shrink), this touches only added / removed / changed records.
+   *  This is what local edits must use: a single card touch produces a tiny
+   *  delta instead of re-encoding the entire document.
+   *
+   *  Runs inside one localOrigin transaction so observers ignore the echo. */
+  applyDiff(next: ProjectData, metadata?: ProjectMetadata): void {
+    this.applyLocal(() => {
+      const tables = this.doc.getMap('tables');
+      for (const name of TABLE_NAMES) {
+        const nextRecords = ((next?.[name] ?? []) as unknown) as Array<Record<string, unknown>>;
+        let arr = tables.get(name) as Y.Array<Y.Map<unknown>> | undefined;
+
+        if (!arr) {
+          if (nextRecords.length === 0) continue;
+          arr = new Y.Array<Y.Map<unknown>>();
+          tables.set(name, arr);
+          arr.push(nextRecords.map((r) => recordToYMap(name, r)));
+          continue;
+        }
+
+        // Index current records by id.  First occurrence of each id is the
+        // canonical survivor; later duplicates are pruned in the delete pass
+        // below (byId identity check).  Id-less entries are garbage (every
+        // legit record carries a string id) and are also pruned.
+        const byId = new Map<string, Y.Map<unknown>>();
+        for (const m of arr) {
+          if (m instanceof Y.Map) {
+            const id = m.get('id');
+            if (typeof id === 'string' && !byId.has(id)) byId.set(id, m);
+          }
+        }
+
+        // Codex-W4: 無言 drop を可視化するための garbage カウンタ．正当な削除
+        // (id が next から消えた) は数えない — あくまで「本来あり得ない不正データ」
+        // (id 無し / 重複) を計上し，検出時のみ警告する (schema バグ / 破損の早期検知)．
+        let incomingIdless = 0; // 受信側: id を持たないレコード
+        let incomingDup = 0; // 受信側: 同一 id の重複
+        let prunedNonMap = 0; // 保存側: Y.Map でない要素
+        let prunedIdless = 0; // 保存側: id 無しの Y.Map
+        let prunedDup = 0; // 保存側: canonical でない重複コピー
+
+        // Upsert each next record (append new, update existing in place).
+        const nextIds = new Set<string>();
+        for (const rec of nextRecords) {
+          const id = rec.id;
+          if (typeof id !== 'string') {
+            incomingIdless += 1;
+            continue; // reject id-less incoming
+          }
+          if (nextIds.has(id)) {
+            incomingDup += 1;
+            continue; // first wins among incoming duplicates
+          }
+          nextIds.add(id);
+          const existing = byId.get(id);
+          if (existing) {
+            updateYMapFields(name, existing, rec);
+          } else {
+            arr.push([recordToYMap(name, rec)]);
+          }
+        }
+
+        // Delete pass (back-to-front keeps indices valid).  Removes, in order:
+        //   - non-Y.Map / id-less garbage
+        //   - records whose id disappeared from `next`
+        //   - duplicate copies of an id (anything that isn't the byId survivor)
+        for (let i = arr.length - 1; i >= 0; i--) {
+          const m = arr.get(i);
+          if (!(m instanceof Y.Map)) {
+            prunedNonMap += 1;
+            arr.delete(i, 1);
+            continue;
+          }
+          const id = m.get('id');
+          if (typeof id !== 'string') {
+            prunedIdless += 1;
+            arr.delete(i, 1);
+            continue;
+          }
+          if (!nextIds.has(id)) {
+            arr.delete(i, 1); // 正当な削除 (garbage ではない) — 計上しない
+            continue;
+          }
+          // Prune only true duplicates: an id present in byId whose canonical
+          // survivor is a DIFFERENT Y.Map.  Records newly appended during this
+          // upsert are absent from byId (snapshotted before the push) and must
+          // be kept — guarding on byId.has(id) prevents deleting them.
+          if (byId.has(id) && byId.get(id) !== m) {
+            prunedDup += 1;
+            arr.delete(i, 1); // duplicate of a surviving canonical record
+          }
+        }
+
+        // Codex-W4: garbage を検出したら 1 テーブル 1 行で警告する．恒常的に出る
+        // ようなら受信元 (他クライアント / 永続層) かスキーマに不整合がある合図．
+        if (incomingIdless || incomingDup || prunedNonMap || prunedIdless || prunedDup) {
+          console.warn(
+            `[yjsBridge] applyDiff table=${name}: dropped garbage — ` +
+              `incoming(idless=${incomingIdless}, dup=${incomingDup}) ` +
+              `stored(nonMap=${prunedNonMap}, idless=${prunedIdless}, dup=${prunedDup})`,
+          );
+        }
+      }
+
+      if (metadata) {
+        const m = this.doc.getMap('metadata');
+        const nextKeys = new Set(Object.keys(metadata));
+        for (const [k, v] of Object.entries(metadata)) {
+          const val = isPlainObject(v) ? cloneShallow(v) : v;
+          if (!fieldEquals(m.get(k), val)) m.set(k, val);
+        }
+        // Remove metadata keys no longer present.
+        for (const k of Array.from(m.keys())) {
+          if (!nextKeys.has(k)) m.delete(k);
+        }
+      }
+    });
+  }
+
   /** Snapshot the Y.Doc as plain ProjectData. */
   toProjectData(): ProjectData {
     const tables = this.doc.getMap('tables');
@@ -221,11 +443,14 @@ export class YjsSyncBridge {
 
   /** Subscribe to remote-originated changes.  The callback fires after each
    *  transaction whose origin is NOT this bridge's localOrigin.  It receives
-   *  the latest ProjectData snapshot — wire it into the Zustand store. */
-  observe(onRemoteChange: (data: ProjectData) => void): () => void {
+   *  the latest ProjectData snapshot AND metadata — wire both into the store.
+   *  (Codex-W2: remote metadata 変更も反映させるため metadata を同梱する．) */
+  observe(
+    onRemoteChange: (data: ProjectData, metadata: Partial<ProjectMetadata> | null) => void
+  ): () => void {
     const handler = (transaction: Y.Transaction) => {
       if (transaction.origin === this.localOrigin) return;
-      onRemoteChange(this.toProjectData());
+      onRemoteChange(this.toProjectData(), this.toMetadata());
     };
     this.doc.on('afterTransaction', handler);
     return () => this.doc.off('afterTransaction', handler);

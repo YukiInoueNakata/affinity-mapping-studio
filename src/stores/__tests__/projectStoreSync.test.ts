@@ -128,10 +128,16 @@ describe('projectStore + YjsSyncBridge — remote changes flow into store', () =
     const storeA = useProjectStore.getState();
     storeA.loadProject(null, freshProject('A'));
     const bridgeA = new YjsSyncBridge();
-    storeA.attachSyncBridge(bridgeA);
+    // bridgeA is the origin peer that establishes the shared table structure
+    // (in production this role is the server doc).  It must seed so the table
+    // Y.Arrays exist exactly once before bridgeB clones them — otherwise both
+    // bridges create separate 'participants' arrays and the tables.set conflict
+    // silently drops one side's rows (concurrent-root-creation hazard).
+    storeA.attachSyncBridge(bridgeA, { seed: true });
 
     // Set up bridge B (independent doc, no store binding for simplicity —
-    // we just verify B's Y.Doc converges with A's)
+    // we just verify B's Y.Doc converges with A's).  Cloning AFTER bridgeA
+    // seeded means B inherits the same shared arrays.
     const bridgeB = new YjsSyncBridge();
     Y.applyUpdate(bridgeB.doc, Y.encodeStateAsUpdate(bridgeA.doc));
 
@@ -182,6 +188,86 @@ describe('projectStore + YjsSyncBridge — segments mirror', () => {
     const dumped = bridge.toProjectData();
     expect(dumped.source_segments).toHaveLength(3);
     expect(dumped.source_segments.map((s) => s.text)).toEqual(['原文1', '原文2', '原文3']);
+  });
+});
+
+describe('projectStore + YjsSyncBridge — metadata mirror (Codex-W2)', () => {
+  it('setProjectName が Y.Doc の metadata にミラーされる', () => {
+    const store = useProjectStore.getState();
+    store.loadProject(null, freshProject('before'));
+    const bridge = new YjsSyncBridge();
+    store.attachSyncBridge(bridge);
+
+    useProjectStore.getState().setProjectName('after');
+
+    expect(useProjectStore.getState().project?.metadata.name).toBe('after');
+    expect(bridge.doc.getMap('metadata').get('name')).toBe('after');
+  });
+
+  it('setDisplaySettings が Y.Doc の metadata にミラーされる', () => {
+    const store = useProjectStore.getState();
+    store.loadProject(null, freshProject());
+    const bridge = new YjsSyncBridge();
+    store.attachSyncBridge(bridge);
+
+    const settings = { cardFontScale: 1.25 } as never;
+    useProjectStore.getState().setDisplaySettings(settings);
+
+    const mirrored = bridge.doc.getMap('metadata').get('displaySettings') as {
+      cardFontScale: number;
+    };
+    expect(mirrored?.cardFontScale).toBe(1.25);
+  });
+
+  it('リモートの metadata 変更が store.project へ反映される', () => {
+    const store = useProjectStore.getState();
+    store.loadProject(null, freshProject('local'));
+    const localBridge = new YjsSyncBridge();
+    store.attachSyncBridge(localBridge);
+
+    const remoteBridge = new YjsSyncBridge();
+    Y.applyUpdate(remoteBridge.doc, Y.encodeStateAsUpdate(localBridge.doc));
+    remoteBridge.applyDiff(remoteBridge.toProjectData(), {
+      ...useProjectStore.getState().project!.metadata,
+      name: 'renamed-by-remote',
+    });
+    Y.applyUpdate(
+      localBridge.doc,
+      Y.encodeStateAsUpdate(remoteBridge.doc, Y.encodeStateVector(localBridge.doc))
+    );
+
+    expect(useProjectStore.getState().project?.metadata.name).toBe('renamed-by-remote');
+  });
+});
+
+describe('projectStore + YjsSyncBridge — restoreSnapshot mirror (Codex-W3)', () => {
+  it('restoreSnapshot が復元データを Y.Doc へミラーする', () => {
+    const store = useProjectStore.getState();
+    store.loadProject(null, freshProject());
+    const bridge = new YjsSyncBridge();
+    store.attachSyncBridge(bridge);
+
+    // 状態1: P01 のみ．この時点を snapshot として保存．
+    store.applyCommand(makeAddParticipantCommand(makeParticipant('P01')));
+    const snapData = JSON.parse(
+      JSON.stringify(useProjectStore.getState().project!.data)
+    );
+    useProjectStore.getState().addSnapshot({
+      metadata: { id: 'snap-1', timestamp: NOW, kind: 'manual', label: 'P01 のみ' },
+      data: snapData,
+    });
+
+    // 状態2: P02 を追加 (合計 2 名)．bridge にも反映済．
+    useProjectStore.getState().applyCommand(makeAddParticipantCommand(makeParticipant('P02')));
+    expect(bridge.toProjectData().participants).toHaveLength(2);
+
+    // 復元: snapshot (P01 のみ) へ戻す → bridge も 1 名へ収束するはず．
+    useProjectStore.getState().restoreSnapshot('snap-1');
+
+    const local = useProjectStore.getState().project!.data.participants;
+    expect(local.map((p) => p.code)).toEqual(['P01']);
+    const mirrored = bridge.toProjectData().participants;
+    expect(mirrored.map((p) => p.code)).toEqual(['P01']);
   });
 });
 

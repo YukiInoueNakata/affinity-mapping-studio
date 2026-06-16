@@ -19,13 +19,19 @@ import type { ProjectFile } from '@shared/types/project';
 
 /** True if the Y.Doc's `tables` map already holds any records — i.e. data was
  *  restored from the local IndexedDB cache (or otherwise present). */
-function docHasData(doc: Y.Doc): boolean {
+export function docHasData(doc: Y.Doc): boolean {
+  // Conservative emptiness test guarding destructive uploadProject/seed paths.
+  // Treat the doc as "has data" if ANY table holds rows OR the metadata map is
+  // non-empty.  A room that only carries metadata (or a partially-written /
+  // broken-schema doc) must NOT be judged empty: seeding over it would delete
+  // and re-add records, tombstoning shared content and risking a wipe.
   const tables = doc.getMap('tables');
   let has = false;
   tables.forEach((v) => {
     if (v instanceof Y.Array && v.length > 0) has = true;
   });
-  return has;
+  if (has) return true;
+  return doc.getMap('metadata').size > 0;
 }
 
 export interface ConnectOptions {
@@ -82,6 +88,13 @@ class SyncManager {
   private pendingEpoch: string | null = null;
   /** epoch 不一致リカバリ中フラグ (再帰的な reconnect ループを防ぐ)． */
   private epochRecovering = false;
+  /** Codex-C2 (2026-06-16): uploadProject 先着レース検出．
+   *  自分が seed したときの doc.clientID．`__sync.seedOwner` が LWW でこの値以外に
+   *  収束したら「別クライアントの seed が勝った」= 自分のアップロードは破棄された，
+   *  と判定して store を勝者状態へ再ハイドレートする． */
+  private uploadOwnerId: number | null = null;
+  /** `__sync` マップ observer の解除関数． */
+  private seedOwnerUnobserve: (() => void) | null = null;
 
   getState(): SyncState {
     return this.state;
@@ -136,6 +149,16 @@ class SyncManager {
 
     this.bridge = bridge;
     this.provider = provider;
+
+    // Codex-C2: seed 先着判定用に `__sync` マップを監視する．別クライアントの
+    // uploadProject が LWW で勝つと seedOwner が自分の clientID 以外に収束するので，
+    // その瞬間に自分のアップロードが破棄されたと判定して再ハイドレートする．
+    {
+      const syncMeta = doc.getMap('__sync');
+      const onSyncMetaChange = () => this.checkSeedOwnerConflict();
+      syncMeta.observe(onSyncMetaChange);
+      this.seedOwnerUnobserve = () => syncMeta.unobserve(onSyncMetaChange);
+    }
 
     // バグ修正 (2026-06-02 incident): 旧コードは hadCache=false ＋ ローカルプロジェクト
     // 非 null 時に attachSyncBridge({ seed: true }) を呼んでサーバーの Y.Doc を
@@ -256,18 +279,57 @@ class SyncManager {
    *  re-adds table contents and would otherwise wipe the shared room. */
   uploadProject(project: ProjectFile): void {
     if (!this.bridge) throw new Error('not connected to a room');
+    // 同期完了前は server の現状 (既存行) が doc に未反映なので docHasData が
+    // 偽陰性になり得る．synced を必須にして「空に見えるが実は既存データあり」
+    // の room を上書きする事故を防ぐ．synced 後は server pre-seed 済の空 array
+    // のみが見え (= docHasData=false)，seedFromProjectData は push に集約され union．
+    if (!this.state.synced) {
+      throw new Error('まだサーバーと同期していません。同期完了後に再試行してください');
+    }
     if (docHasData(this.bridge.doc)) {
       throw new Error('room already has data — refusing to overwrite');
     }
     const store = useProjectStore.getState();
     store.loadProject(null, project);
     const bridge = this.bridge;
+    // Codex-C2: seed と同一トランザクションで `__sync.seedOwner` に自分の clientID を
+    // 書く．2 クライアントが同時に seed しても，この値は LWW で全ピアで同一値に収束し，
+    // 「先着勝者」を決定論的に判定できる (checkSeedOwnerConflict で敗者が検出)．
+    const ownerId = bridge.doc.clientID;
     bridge.applyLocal(() => {
       bridge.seedFromProjectData(project.data, project.metadata);
+      bridge.doc.getMap('__sync').set('seedOwner', ownerId);
+    });
+    this.uploadOwnerId = ownerId;
+  }
+
+  /** Codex-C2: `__sync.seedOwner` が自分の seed と異なる値に収束したら，別クライアント
+   *  のアップロードが LWW で勝ったということ．自分が seed したローカル project は
+   *  CRDT 上ですでに勝者の内容に上書きされているので，store を勝者状態へ再ハイドレート
+   *  し，敗者ユーザーへ明示的に通知する． */
+  private checkSeedOwnerConflict(): void {
+    if (this.uploadOwnerId === null || !this.bridge) return;
+    const owner = this.bridge.doc.getMap('__sync').get('seedOwner');
+    if (typeof owner !== 'number' || owner === this.uploadOwnerId) return;
+    const mine = this.uploadOwnerId;
+    this.uploadOwnerId = null;
+    console.warn(
+      `[sync] seed conflict: 別クライアント (${owner}) が先着アップロードに勝ちました ` +
+        `(mine=${mine})．ローカル seed を破棄しルーム内容を再読み込みします`,
+    );
+    useProjectStore.getState().hydrateFromBridge(this.bridge);
+    this.setState({
+      errorDetail:
+        '別のユーザーが先にこのルームへプロジェクトを投入しました。あなたのアップロードは破棄され、ルームの内容を読み込みました。',
     });
   }
 
   disconnect(): void {
+    if (this.seedOwnerUnobserve) {
+      this.seedOwnerUnobserve();
+      this.seedOwnerUnobserve = null;
+    }
+    this.uploadOwnerId = null;
     if (this.unsubProvider) {
       this.unsubProvider();
       this.unsubProvider = null;
@@ -306,10 +368,32 @@ class SyncManager {
     if (this.epochRecovering) return; // 再帰ガード
     this.epochRecovering = true;
     try {
-      // 新しい epoch を先に保存 → clean 再接続では一致するので再発しない．
-      writeEpoch(roomId, serverEpoch);
+      // 1. 自分の IndexedDB 接続を確実に閉じる．disconnect() は idb.destroy() を
+      //    await しないので，ここで明示的に待つ（待たないと自分が deleteDatabase の
+      //    blocker になり onblocked へ落ちる）．
+      const idb = this.idb;
       this.disconnect();
-      await deleteRoomCache(roomId);
+      if (idb) {
+        try {
+          await idb.destroy();
+        } catch {
+          /* 二重 destroy は無害．close を待つのが目的 */
+        }
+      }
+      // 2. 古い lineage のキャッシュを削除．onblocked では resolve せず真の成功のみ
+      //    true を返す（Codex 指摘の race 対策）．
+      const deleted = await deleteRoomCache(roomId);
+      // 3. キャッシュ削除を確認できたときだけ新 epoch を保存する．削除に失敗したら
+      //    旧 epoch のままにして次回接続でもう一度復旧経路に入れる（旧 lineage を
+      //    一致扱いして再アップロード＝再肥大するのを防ぐ）．
+      if (deleted) {
+        writeEpoch(roomId, serverEpoch);
+      } else {
+        console.warn(
+          `[sync] epoch recovery: kj-room-${roomId} を削除できませんでした．` +
+            `epoch は据え置き，次回接続で再試行します．`,
+        );
+      }
       const opts = this.lastOpts;
       if (opts && opts.roomId === roomId) {
         await this.connect(opts);
@@ -397,16 +481,34 @@ function writeEpoch(roomId: string, epoch: string): void {
 }
 
 /** このルームの y-indexeddb キャッシュ (`kj-room-<roomId>`) を削除する．
- *  epoch 不一致時に古い lineage のキャッシュを捨てるために使う． */
-function deleteRoomCache(roomId: string): Promise<void> {
-  return new Promise<void>((resolve) => {
+ *  epoch 不一致時に古い lineage のキャッシュを捨てるために使う．
+ *  削除が確定したときだけ true を返す．`onblocked` では resolve せず，他の接続が
+ *  閉じて onsuccess が発火するのを待つ（早期に成功扱いすると古いキャッシュが残った
+ *  まま再接続してしまう — Codex 指摘の race）．閉じない場合は timeout で false． */
+export function deleteRoomCache(roomId: string, timeoutMs = 3000): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
     try {
       const req = indexedDB.deleteDatabase(`kj-room-${roomId}`);
-      req.onsuccess = () => resolve();
-      req.onerror = () => resolve();
-      req.onblocked = () => resolve();
+      req.onsuccess = () => done(true);
+      req.onerror = () => done(false);
+      req.onblocked = () => {
+        // 別の接続がまだ開いている．request は pending のまま残り，接続が閉じれば
+        // onsuccess が発火する．ここでは resolve しない．
+        console.warn(
+          `[sync] deleteRoomCache blocked for kj-room-${roomId}; 接続クローズ待ち`,
+        );
+      };
+      // 安全網: success も error も来ない（恒久ブロック等）場合は false で諦め，
+      // 呼び出し側が次回の epoch 不一致で再試行できるようにする．
+      setTimeout(() => done(false), timeoutMs);
     } catch {
-      resolve();
+      done(false);
     }
   });
 }

@@ -151,7 +151,7 @@ export function App() {
         if (syncManager.isInRoom()) {
           // Connected to an (empty) room: upload rather than just load locally.
           try {
-            syncManager.uploadProject(r.project);
+            await syncManager.uploadProject(r.project);
           } catch {
             alert(
               'このルームには既にデータがあるため読み込めません。\n' +
@@ -428,7 +428,7 @@ export function App() {
       // Connected to an (empty) room: upload the opened project INTO the room
       // so it becomes the shared data, rather than replacing only our local view.
       try {
-        syncManager.uploadProject(r.project);
+        await syncManager.uploadProject(r.project);
       } catch {
         alert(
           'このルームには既にデータがあるため読み込めません。\n' +

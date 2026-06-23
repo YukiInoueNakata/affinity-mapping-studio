@@ -277,7 +277,7 @@ class SyncManager {
    *  the room's Y.Doc from the project so it propagates to the server and other
    *  peers.  Refuses if the room already has data, since seeding deletes then
    *  re-adds table contents and would otherwise wipe the shared room. */
-  uploadProject(project: ProjectFile): void {
+  async uploadProject(project: ProjectFile): Promise<void> {
     if (!this.bridge) throw new Error('not connected to a room');
     // 同期完了前は server の現状 (既存行) が doc に未反映なので docHasData が
     // 偽陰性になり得る．synced を必須にして「空に見えるが実は既存データあり」
@@ -289,13 +289,35 @@ class SyncManager {
     if (docHasData(this.bridge.doc)) {
       throw new Error('room already has data — refusing to overwrite');
     }
+    const bridge = this.bridge;
+    const ownerId = bridge.doc.clientID;
+    // #2 (2026-06-23): サーバー room claim を取得してから seed する．最初の 1 クライアント
+    // だけが grant され，同時 upload による「2 プロジェクト混在」を根本的に防ぐ．旧サーバーは
+    // no-server-support で granted=true を返し，従来の seedOwner LWW にフォールバックする．
+    if (this.provider) {
+      const claim = await this.provider.requestSeedClaim(ownerId);
+      if (!claim.granted) {
+        // 別クライアントが先に claim 済 / viewer / 既存データあり．seed せず内容を読み込む．
+        if (docHasData(bridge.doc)) {
+          useProjectStore.getState().hydrateFromBridge(bridge);
+        }
+        const msg =
+          claim.reason === 'already-claimed'
+            ? '別のユーザーが先にこのルームへプロジェクトを投入中です。アップロードを中止しました。'
+            : claim.reason === 'room-has-data'
+              ? 'ルームには既にデータがあります。アップロードを中止しました。'
+              : claim.reason === 'viewer-cannot-seed'
+                ? '閲覧者はプロジェクトをアップロードできません。'
+                : `アップロードできませんでした (${claim.reason})`;
+        this.setState({ errorDetail: msg });
+        throw new Error(msg);
+      }
+    }
     const store = useProjectStore.getState();
     store.loadProject(null, project);
-    const bridge = this.bridge;
     // Codex-C2: seed と同一トランザクションで `__sync.seedOwner` に自分の clientID を
-    // 書く．2 クライアントが同時に seed しても，この値は LWW で全ピアで同一値に収束し，
-    // 「先着勝者」を決定論的に判定できる (checkSeedOwnerConflict で敗者が検出)．
-    const ownerId = bridge.doc.clientID;
+    // 書く．claim 非対応の旧サーバーでも，この LWW で「先着勝者」を決定論的に判定できる
+    // (checkSeedOwnerConflict で敗者が検出)．claim とで二重に防御．
     bridge.applyLocal(() => {
       bridge.seedFromProjectData(project.data, project.metadata);
       bridge.doc.getMap('__sync').set('seedOwner', ownerId);

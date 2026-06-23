@@ -27,6 +27,12 @@ const MESSAGE_AWARENESS = 1;
 // が JSON で送られてくる．未対応サーバー (旧 kj-trace-server) からは届かないため
 // role は null のままで safe fallback (= editor 既定) で動作．
 const MESSAGE_KJ_META = 2;
+// #2 (2026-06-23): 空ルームへの seed を排他する claim．双方向 JSON．
+//   client → server: { kind: 'seed-claim', clientId }
+//   server → client: { kind: 'seed-claim-result', granted, reason }
+// 旧サーバーは type=3 を unknown として無視する → requestSeedClaim はタイムアウトし
+// granted (no-server-support) にフォールバック (従来の seedOwner LWW で動作・後方互換)．
+const MESSAGE_SEED_CLAIM = 3;
 
 // Sec-008 (2026-06-03): WS subprotocol．サーバーは receive-only で問題なし．
 // 厳格モード (KJ_REQUIRE_KJ_STUDIO_PROTOCOL=true) のサーバーでもこの subprotocol で通過する．
@@ -120,6 +126,8 @@ export class YjsWebsocketProvider {
   private suppressUpload = false;
   /** 直近に受信したサーバー docEpoch (null = epoch 非対応サーバー)． */
   private serverEpoch: string | null = null;
+  /** #2: 進行中の seed-claim 要求の resolver (1 件のみ)． */
+  private seedClaimResolver: ((r: { granted: boolean; reason: string }) => void) | null = null;
 
   constructor(opts: YjsWebsocketProviderOptions) {
     this.opts = {
@@ -282,6 +290,37 @@ export class YjsWebsocketProvider {
     }
   }
 
+  /** #2: 空ルームへの seed 前にサーバーへ claim を要求する．最初の 1 クライアントだけが
+   *  grant される．旧サーバー (type=3 非対応) は無反応なので timeoutMs 後に
+   *  granted=true / reason='no-server-support' で解決し，従来の seedOwner LWW にフォールバック
+   *  する (後方互換)．接続が無ければ即 granted=false． */
+  requestSeedClaim(clientId: number, timeoutMs = 3000): Promise<{ granted: boolean; reason: string }> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return Promise.resolve({ granted: false, reason: 'not-connected' });
+    }
+    // 前の未解決要求があれば畳む (通常起こらない)．
+    if (this.seedClaimResolver) {
+      this.seedClaimResolver({ granted: false, reason: 'superseded' });
+      this.seedClaimResolver = null;
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.seedClaimResolver) {
+          this.seedClaimResolver = null;
+          resolve({ granted: true, reason: 'no-server-support' });
+        }
+      }, timeoutMs);
+      this.seedClaimResolver = (r) => {
+        clearTimeout(timer);
+        resolve(r);
+      };
+      const enc = encoding.createEncoder();
+      encoding.writeVarUint(enc, MESSAGE_SEED_CLAIM);
+      encoding.writeVarString(enc, JSON.stringify({ kind: 'seed-claim', clientId }));
+      this.send(encoding.toUint8Array(enc));
+    });
+  }
+
   private sendSyncStep1(): void {
     const enc = encoding.createEncoder();
     encoding.writeVarUint(enc, MESSAGE_SYNC);
@@ -387,6 +426,21 @@ export class YjsWebsocketProvider {
         }
       } catch (e) {
         console.warn('[provider] failed to parse kj-meta payload:', e);
+      }
+    } else if (type === MESSAGE_SEED_CLAIM) {
+      // #2: サーバーからの seed-claim 結果．進行中の requestSeedClaim を解決する．
+      let result = { granted: false, reason: 'parse-error' };
+      try {
+        const json = decoding.readVarString(dec);
+        const meta = JSON.parse(json) as { granted?: boolean; reason?: string };
+        result = { granted: meta.granted === true, reason: meta.reason ?? '' };
+      } catch (e) {
+        console.warn('[provider] failed to parse seed-claim payload:', e);
+      }
+      if (this.seedClaimResolver) {
+        const r = this.seedClaimResolver;
+        this.seedClaimResolver = null;
+        r(result);
       }
     } else {
       console.warn('unknown ws message type:', type);

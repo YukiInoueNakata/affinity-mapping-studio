@@ -322,6 +322,24 @@ describe('YjsSyncBridge — applyDiff (incremental mirror)', () => {
     expect(out.group_positions).toHaveLength(1);
   });
 
+  it('findRecordById/deleteRecordById use the per-table key field for position tables', () => {
+    const bridge = new YjsSyncBridge();
+    const base = emptyData();
+    base.card_positions.push({ cardId: 'c1', x: 5, y: 6 } as never);
+    base.group_positions.push({ groupId: 'g1', x: 1, y: 2, width: 10, height: 10 } as never);
+    bridge.applyDiff(base);
+
+    // Lookup by the foreign key, not `id`.
+    expect(bridge.findRecordById('card_positions', 'c1')).not.toBeNull();
+    expect(bridge.findRecordById('group_positions', 'g1')).not.toBeNull();
+    expect(bridge.findRecordById('card_positions', 'nope')).toBeNull();
+
+    // Delete by the foreign key removes exactly that record.
+    expect(bridge.deleteRecordById('card_positions', 'c1')).toBe(true);
+    expect(bridge.toProjectData().card_positions).toHaveLength(0);
+    expect(bridge.toProjectData().group_positions).toHaveLength(1);
+  });
+
   it('adds new records and removes deleted ones', () => {
     const bridge = new YjsSyncBridge();
     bridge.applyDiff(sampleData());

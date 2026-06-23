@@ -331,8 +331,9 @@ export class YjsSyncBridge {
           if (nextRecords.length === 0) continue;
           arr = new Y.Array<Y.Map<unknown>>();
           tables.set(name, arr);
-          arr.push(nextRecords.map((r) => recordToYMap(name, r)));
-          continue;
+          // Fall through to the shared upsert/prune pass below so key validation
+          // (reject key-less / duplicate records) applies to the initial
+          // population too, instead of pushing raw records unchecked.
         }
 
         // Index current records by their key field (`id` for most tables,
@@ -510,12 +511,16 @@ export class YjsSyncBridge {
     return created;
   }
 
+  /** Look up a record by its identity key.  Most tables use `id`, but the
+   *  position tables are keyed by cardId/groupId — index by the right field so
+   *  these helpers can't silently miss (same id-assumption that wiped positions). */
   findRecordById(tableName: TableName, id: string): Y.Map<unknown> | null {
     const tables = this.doc.getMap('tables');
     const arr = tables.get(tableName) as Y.Array<Y.Map<unknown>> | undefined;
     if (!arr) return null;
+    const keyField = keyFieldFor(tableName);
     for (const m of arr) {
-      if (m instanceof Y.Map && m.get('id') === id) return m;
+      if (m instanceof Y.Map && m.get(keyField) === id) return m;
     }
     return null;
   }
@@ -526,9 +531,10 @@ export class YjsSyncBridge {
       const tables = this.doc.getMap('tables');
       const arr = tables.get(tableName) as Y.Array<Y.Map<unknown>> | undefined;
       if (!arr) return;
+      const keyField = keyFieldFor(tableName);
       for (let i = 0; i < arr.length; i++) {
         const m = arr.get(i);
-        if (m instanceof Y.Map && m.get('id') === id) {
+        if (m instanceof Y.Map && m.get(keyField) === id) {
           arr.delete(i, 1);
           removed = true;
           return;

@@ -56,6 +56,21 @@ export const Y_TEXT_FIELDS: Partial<Record<TableName, ReadonlyArray<string>>> = 
   gta_categories: ['definition'],
 };
 
+/** Identity key per table.  Almost every record is keyed by `id`, but two
+ *  tables legitimately have no `id` field and use a foreign key instead:
+ *  card_positions (cardId) and group_positions (groupId).  applyDiff / uniqById
+ *  MUST index by the correct key — otherwise these records look "id-less" and
+ *  get pruned as garbage (regression introduced with the v0.2.19 id-pruning
+ *  change, which silently wiped all card/group positions on every sync edit). */
+export const KEY_FIELD: Partial<Record<TableName, string>> = {
+  card_positions: 'cardId',
+  group_positions: 'groupId',
+};
+
+function keyFieldFor(name: TableName | string): string {
+  return KEY_FIELD[name as TableName] ?? 'id';
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return (
     v !== null &&
@@ -233,11 +248,12 @@ function uniqById(
   records: Record<string, unknown>[],
   table: string
 ): Record<string, unknown>[] {
+  const keyField = keyFieldFor(table);
   const seen = new Set<string>();
   let dropped = 0;
   const out: Record<string, unknown>[] = [];
   for (const r of records) {
-    const id = r.id;
+    const id = r[keyField];
     if (typeof id === 'string') {
       if (seen.has(id)) {
         dropped += 1;
@@ -308,6 +324,7 @@ export class YjsSyncBridge {
       const tables = this.doc.getMap('tables');
       for (const name of TABLE_NAMES) {
         const nextRecords = ((next?.[name] ?? []) as unknown) as Array<Record<string, unknown>>;
+        const keyField = keyFieldFor(name);
         let arr = tables.get(name) as Y.Array<Y.Map<unknown>> | undefined;
 
         if (!arr) {
@@ -318,14 +335,15 @@ export class YjsSyncBridge {
           continue;
         }
 
-        // Index current records by id.  First occurrence of each id is the
-        // canonical survivor; later duplicates are pruned in the delete pass
-        // below (byId identity check).  Id-less entries are garbage (every
-        // legit record carries a string id) and are also pruned.
+        // Index current records by their key field (`id` for most tables,
+        // `cardId`/`groupId` for the position tables).  First occurrence of each
+        // key is the canonical survivor; later duplicates are pruned in the
+        // delete pass below (byId identity check).  Entries lacking the key field
+        // are garbage and are also pruned.
         const byId = new Map<string, Y.Map<unknown>>();
         for (const m of arr) {
           if (m instanceof Y.Map) {
-            const id = m.get('id');
+            const id = m.get(keyField);
             if (typeof id === 'string' && !byId.has(id)) byId.set(id, m);
           }
         }
@@ -342,10 +360,10 @@ export class YjsSyncBridge {
         // Upsert each next record (append new, update existing in place).
         const nextIds = new Set<string>();
         for (const rec of nextRecords) {
-          const id = rec.id;
+          const id = rec[keyField];
           if (typeof id !== 'string') {
             incomingIdless += 1;
-            continue; // reject id-less incoming
+            continue; // reject records missing their key field
           }
           if (nextIds.has(id)) {
             incomingDup += 1;
@@ -371,7 +389,7 @@ export class YjsSyncBridge {
             arr.delete(i, 1);
             continue;
           }
-          const id = m.get('id');
+          const id = m.get(keyField);
           if (typeof id !== 'string') {
             prunedIdless += 1;
             arr.delete(i, 1);

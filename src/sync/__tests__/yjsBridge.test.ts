@@ -287,6 +287,41 @@ describe('YjsSyncBridge — applyDiff (incremental mirror)', () => {
     expect(out.source_segments[0].speaker).toBe('A さん');
   });
 
+  it('preserves id-less position tables across diffs (card_positions/group_positions regression)', () => {
+    // Regression: applyDiff once pruned every card_positions/group_positions
+    // record because they have no `id` field (keyed by cardId/groupId), so any
+    // unrelated edit wiped all positions and stacked every card at the origin.
+    const bridge = new YjsSyncBridge();
+    const base = emptyData();
+    base.card_positions.push({ cardId: 'c1', x: 10, y: 20 } as never);
+    base.group_positions.push({ groupId: 'g1', x: 1, y: 2, width: 100, height: 80 } as never);
+    bridge.applyDiff(base);
+    expect(bridge.toProjectData().card_positions).toHaveLength(1);
+    expect(bridge.toProjectData().group_positions).toHaveLength(1);
+
+    // An unrelated metadata-only diff must NOT delete the positions.
+    bridge.applyDiff(base, { name: 'x' } as never);
+    let out = bridge.toProjectData();
+    expect(out.card_positions).toEqual([{ cardId: 'c1', x: 10, y: 20 }]);
+    expect(out.group_positions).toEqual([{ groupId: 'g1', x: 1, y: 2, width: 100, height: 80 }]);
+
+    // Moving a card updates its position in place (matched by cardId).
+    const moved = emptyData();
+    moved.card_positions.push({ cardId: 'c1', x: 999, y: 888 } as never);
+    moved.group_positions.push({ groupId: 'g1', x: 1, y: 2, width: 100, height: 80 } as never);
+    bridge.applyDiff(moved);
+    out = bridge.toProjectData();
+    expect(out.card_positions).toEqual([{ cardId: 'c1', x: 999, y: 888 }]);
+
+    // Dropping a position removes only that record.
+    const noPos = emptyData();
+    noPos.group_positions.push({ groupId: 'g1', x: 1, y: 2, width: 100, height: 80 } as never);
+    bridge.applyDiff(noPos);
+    out = bridge.toProjectData();
+    expect(out.card_positions).toHaveLength(0);
+    expect(out.group_positions).toHaveLength(1);
+  });
+
   it('adds new records and removes deleted ones', () => {
     const bridge = new YjsSyncBridge();
     bridge.applyDiff(sampleData());

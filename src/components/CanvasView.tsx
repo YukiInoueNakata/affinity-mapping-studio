@@ -21,6 +21,7 @@ import { syncManager } from '../sync/syncManager.js';
 import {
   createSnapshot,
   fetchSnapshots,
+  restoreSnapshot,
   SnapshotApiError,
   type SnapshotEntry,
 } from '../api/snapshotApi.js';
@@ -85,9 +86,23 @@ import {
   relationExists,
   RELATION_TYPE_COLORS,
 } from '../domain/relations.js';
+import { confirmBulkOperation } from '../utils/bulkGuard.js';
 
 const nodeTypes = { card: CardNode, kjgroup: GroupNode };
 const edgeTypes = { relation: RelationEdge };
+
+// 対策4: スナップショットの trigger を日本語ラベル化して「操作・復元履歴」を読みやすく．
+const SNAPSHOT_TRIGGER_LABELS: Record<string, string> = {
+  manual: '手動',
+  count: '自動(操作)',
+  time: '自動(時間)',
+  'pre-compact': '整理前',
+  'circuit-breaker-prestate': '大規模変更の直前',
+  'pre-restore': '復元前',
+};
+function snapshotTriggerLabel(trigger: string): string {
+  return SNAPSHOT_TRIGGER_LABELS[trigger] ?? trigger;
+}
 
 type AnyNodeData = CardNodeData | GroupNodeData;
 
@@ -236,10 +251,19 @@ function CanvasViewImpl() {
   const [snapshotListOpen, setSnapshotListOpen] = useState(false);
   const [snapshotItems, setSnapshotItems] = useState<SnapshotEntry[] | null>(null);
   const [snapshotListError, setSnapshotListError] = useState<string | null>(null);
+  // 対策5: 復元は editor / admin のみ．role 未通知は editor 既定 (safe fallback)．
+  const [canRestore, setCanRestore] = useState<boolean>(() => {
+    const r = syncManager.getState().role?.role;
+    return r !== 'viewer';
+  });
+  const [restoreBusy, setRestoreBusy] = useState<string | null>(null);
 
   useEffect(() => {
-    // 接続状態が変わったらボタンの有効/無効を更新．
-    const update = () => setSnapshotConnected(syncManager.getSnapshotApiTarget() !== null);
+    // 接続状態 / role が変わったらボタンの有効/無効を更新．
+    const update = () => {
+      setSnapshotConnected(syncManager.getSnapshotApiTarget() !== null);
+      setCanRestore(syncManager.getState().role?.role !== 'viewer');
+    };
     update();
     return syncManager.on(update);
   }, []);
@@ -273,6 +297,45 @@ function CanvasViewImpl() {
       setSnapshotListError(
         e instanceof SnapshotApiError ? e.message : `取得に失敗しました: ${String(e)}`
       );
+    }
+  }, []);
+
+  // 対策5: スナップショット復元．二段確認 → サーバー復元 → 再接続で復元状態を取得．
+  const onRestoreSnapshot = useCallback(async (s: SnapshotEntry) => {
+    const when = new Date(s.ts).toLocaleString();
+    if (
+      !window.confirm(
+        `この状態に復元します。\n` +
+          `${when} / ${snapshotTriggerLabel(s.trigger)} / ` +
+          `C${s.counts.cards} G${s.counts.groups} M${s.counts.memberships}`
+      )
+    )
+      return;
+    if (
+      !window.confirm(
+        '現在の状態は上書きされます（復元前の状態も自動で退避されます）。\n' +
+          '全員が一旦切断され、再接続で復元後の状態になります。復元しますか？'
+      )
+    )
+      return;
+    setRestoreBusy(s.id);
+    setSnapshotMsg(null);
+    try {
+      await restoreSnapshot(s.id);
+      setSnapshotListOpen(false);
+      setSnapshotMsg('復元しました。再接続しています…');
+      try {
+        await syncManager.reconnect();
+        setSnapshotMsg('復元して再接続しました。');
+      } catch {
+        setSnapshotMsg('復元しました。手動で再接続してください。');
+      }
+    } catch (e) {
+      setSnapshotMsg(
+        e instanceof SnapshotApiError ? e.message : `復元に失敗しました: ${String(e)}`
+      );
+    } finally {
+      setRestoreBusy(null);
     }
   }, []);
   const [pickerFor, setPickerFor] = useState<
@@ -536,6 +599,17 @@ function CanvasViewImpl() {
             const t = { x: f.x + dx, y: f.y + dy };
             moves.push({ cardId: id, from: f, to: t });
             overrides.set(id, t);
+          }
+          // 対策1: 大量カードの一括移動は確認する．キャンセル時は視覚位置を元へ戻す．
+          if (!confirmBulkOperation(moves.length, '一括で移動')) {
+            const fromById = new Map(moves.map((m) => [m.cardId, m.from]));
+            setNodes((curr) =>
+              curr.map((n) => {
+                const f = fromById.get(n.id);
+                return f ? { ...n, position: { x: f.x, y: f.y } } : n;
+              })
+            );
+            return;
           }
           const cardWrapWidth = project.metadata.displaySettings?.cardWrapWidth;
           const groupBoundsUpdates = computeCascadedGroupBoundsUpdates(
@@ -982,6 +1056,8 @@ function CanvasViewImpl() {
         added.push({ id: newId(), cardId: cid, groupId: targetGroupId, createdAt: now });
       }
       if (added.length === 0) return;
+      // 対策1: 大量カードのグループ編入 (メンバーシップ一括付替) は確認する．
+      if (!confirmBulkOperation(added.length, 'グループに編入')) return;
       const cardOverrides = new Map(
         cardIds
           .map((cid) => project.data.card_positions.find((p) => p.cardId === cid))
@@ -1411,6 +1487,9 @@ function CanvasViewImpl() {
       return;
     }
 
+    // 対策1: 大量カードを 1 グループにまとめる操作は誤爆リスクが高いので確認する．
+    if (!confirmBulkOperation(selectedCardIds.length, '1 つのグループにまとめ')) return;
+
     // Default: create a new group from selected cards.
     const cardPositions = project.data.card_positions.filter((p) =>
       selectedCardIds.includes(p.cardId)
@@ -1604,9 +1683,9 @@ function CanvasViewImpl() {
           type="button"
           onClick={openSnapshotList}
           disabled={!snapshotConnected}
-          title="スナップショットの一覧を表示（復元は管理者操作）"
+          title="操作・復元履歴を表示し、任意の時点へ復元する"
         >
-          スナップショット一覧
+          操作・復元履歴
         </button>
         {snapshotMsg && <span className="canvas-toolbar-hint">{snapshotMsg}</span>}
         <span className="canvas-toolbar-hint">
@@ -1649,14 +1728,15 @@ function CanvasViewImpl() {
                 marginBottom: 8,
               }}
             >
-              <strong>スナップショット一覧</strong>
+              <strong>操作・復元履歴（スナップショット）</strong>
               <button type="button" onClick={() => setSnapshotListOpen(false)}>
                 閉じる
               </button>
             </div>
             <p style={{ fontSize: 12, opacity: 0.75, marginTop: 0 }}>
-              自動（5分 / 20操作 / compact前）と手動のスナップショットです。
-              復元は管理者操作（サーバー側）で行います。
+              自動（5分 / 20操作 / compact前 / 大規模変更の直前）と手動の記録です。
+              「復元」で任意の時点へ巻き戻せます（復元点の粒度で巻き戻します。個々の操作だけの取り消しではありません）。
+              {!canRestore && '（復元には editor 権限が必要です）'}
             </p>
             {snapshotListError && (
               <p style={{ color: '#c00' }}>{snapshotListError}</p>
@@ -1674,22 +1754,61 @@ function CanvasViewImpl() {
                     <th style={{ padding: '4px 6px' }}>作者</th>
                     <th style={{ padding: '4px 6px' }}>ラベル</th>
                     <th style={{ padding: '4px 6px' }}>枚数</th>
+                    <th style={{ padding: '4px 6px' }}>操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {snapshotItems.map((s) => (
-                    <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
-                        {new Date(s.ts).toLocaleString()}
-                      </td>
-                      <td style={{ padding: '4px 6px' }}>{s.trigger}</td>
-                      <td style={{ padding: '4px 6px' }}>{s.author ?? '-'}</td>
-                      <td style={{ padding: '4px 6px' }}>{s.label ?? ''}</td>
-                      <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
-                        C{s.counts.cards}/G{s.counts.groups}/M{s.counts.memberships}
-                      </td>
-                    </tr>
-                  ))}
+                  {snapshotItems.map((s) => {
+                    const isIncidentMark = s.trigger === 'circuit-breaker-prestate';
+                    return (
+                      <tr
+                        key={s.id}
+                        style={{
+                          borderBottom: '1px solid #eee',
+                          background: isIncidentMark ? 'rgba(220,0,0,0.08)' : undefined,
+                        }}
+                      >
+                        <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                          {new Date(s.ts).toLocaleString()}
+                        </td>
+                        <td
+                          style={{
+                            padding: '4px 6px',
+                            color: isIncidentMark ? '#c00' : undefined,
+                            fontWeight: isIncidentMark ? 600 : undefined,
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={
+                            isIncidentMark
+                              ? 'ここで大規模な構造変更が検知されました（この直前の状態）'
+                              : undefined
+                          }
+                        >
+                          {isIncidentMark ? '⚠ ' : ''}
+                          {snapshotTriggerLabel(s.trigger)}
+                        </td>
+                        <td style={{ padding: '4px 6px' }}>{s.author ?? '-'}</td>
+                        <td style={{ padding: '4px 6px' }}>{s.label ?? ''}</td>
+                        <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                          C{s.counts.cards}/G{s.counts.groups}/M{s.counts.memberships}
+                        </td>
+                        <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                          <button
+                            type="button"
+                            disabled={!canRestore || restoreBusy !== null}
+                            onClick={() => onRestoreSnapshot(s)}
+                            title={
+                              canRestore
+                                ? 'この状態に復元（現在の状態は上書き・自動退避されます）'
+                                : '復元には editor 権限が必要です'
+                            }
+                          >
+                            {restoreBusy === s.id ? '復元中…' : '復元'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}

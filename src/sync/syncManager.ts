@@ -126,6 +126,15 @@ class SyncManager {
     return () => this.listeners.delete(listener);
   }
 
+  /** 対策5: 直近の接続先へ再接続する（スナップショット復元後などに使う）．
+   *  サーバーが epoch を更新していれば connect 内の epoch 不一致リカバリが働き，
+   *  ローカルキャッシュを破棄してサーバーの復元状態を download-only で取得する． */
+  async reconnect(): Promise<void> {
+    const o = this.lastOpts;
+    if (!o) throw new Error('未接続のため再接続できません');
+    await this.connect(o);
+  }
+
   /** Connect to a room.  Resolves once the first sync completes (or rejects
    *  on auth-denied / error within 10 seconds). */
   async connect(opts: ConnectOptions): Promise<void> {

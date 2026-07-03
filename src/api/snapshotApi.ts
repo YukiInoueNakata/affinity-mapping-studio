@@ -33,6 +33,15 @@ function endpoint(t: { baseUrl: string; roomId: string; token: string }): string
   return `${t.baseUrl}/api/snapshots?${qs.toString()}`;
 }
 
+function restoreEndpoint(
+  t: { baseUrl: string; roomId: string; token: string },
+  id: string
+): string {
+  const qs = new URLSearchParams({ room: t.roomId, id });
+  if (t.token) qs.set('t', t.token);
+  return `${t.baseUrl}/api/snapshots/restore?${qs.toString()}`;
+}
+
 async function parseError(res: Response): Promise<string> {
   let detail = `HTTP ${res.status}`;
   try {
@@ -81,4 +90,22 @@ export async function fetchSnapshots(): Promise<SnapshotEntry[]> {
   if (!res.ok) throw new SnapshotApiError(await parseError(res));
   const j = (await res.json()) as { snapshots: SnapshotEntry[] };
   return j.snapshots ?? [];
+}
+
+/**
+ * 対策5: 指定スナップショットへ復元する（editor / admin 権限必須）．
+ * サーバーは復元前に現状を自動退避し，全接続を切断して epoch を更新する．
+ * 成功後はクライアントを再接続して復元状態を取得する必要がある．
+ */
+export async function restoreSnapshot(id: string): Promise<void> {
+  const t = target();
+  let res: Response;
+  try {
+    res = await fetch(restoreEndpoint(t, id), { method: 'POST' });
+  } catch (e) {
+    throw new SnapshotApiError(
+      `サーバーに接続できませんでした: ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+  if (!res.ok) throw new SnapshotApiError(await parseError(res));
 }

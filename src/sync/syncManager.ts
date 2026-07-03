@@ -100,6 +100,27 @@ class SyncManager {
     return this.state;
   }
 
+  /** 段階2: アプリ内スナップショット API 用の接続情報．
+   *  直近の接続 opts (serverUrl/roomId/token) から HTTP ベース URL を導出して返す．
+   *  未接続 (lastOpts が無い) 場合は null． */
+  getSnapshotApiTarget(): {
+    baseUrl: string;
+    roomId: string;
+    token: string;
+    email: string;
+  } | null {
+    const o = this.lastOpts;
+    if (!o) return null;
+    // wss:// → https://, ws:// → http://．末尾スラッシュは除去．
+    const baseUrl = o.serverUrl.replace(/^ws/i, 'http').replace(/\/+$/, '');
+    return {
+      baseUrl,
+      roomId: o.roomId,
+      token: o.token ?? '',
+      email: o.email ?? '',
+    };
+  }
+
   on(listener: (s: SyncState) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

@@ -68,8 +68,22 @@ export interface Card {
    * was created from.  Shown as a provenance sub-label (e.g. "← 003,005").
    * Absent for normal (non-merged) cards. */
   mergedFrom?: number[];
+  /** For merged cards: a full snapshot of the source cards (and their links,
+   * positions, memberships) captured at merge time, so the merge can be undone
+   * at any time via "統合を解除" (not just in-session Undo).  Absent for normal
+   * cards and for pre-0.2.25 merged cards (those remain Undo-only). */
+  mergedSnapshot?: MergedCardSnapshot;
   createdAt: ISODateString;
   updatedAt: ISODateString;
+}
+
+/** Reversal payload for a card merge: everything needed to restore the
+ * pre-merge state. */
+export interface MergedCardSnapshot {
+  cards: Card[];
+  links: CardSourceLink[];
+  positions: CardPosition[];
+  memberships: GroupMembership[];
 }
 
 export interface CardSourceLink {
@@ -86,6 +100,9 @@ export interface CardPosition {
   cardId: string;
   x: number;
   y: number;
+  /** Stacking order among overlapping cards. Higher = front. Absent = 0
+   * (back-compat: pre-0.2.25 data renders identically). */
+  z?: number;
 }
 
 export interface Group {

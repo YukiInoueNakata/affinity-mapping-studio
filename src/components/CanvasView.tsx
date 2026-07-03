@@ -17,6 +17,13 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { useProjectStore } from '../stores/projectStore.js';
+import { syncManager } from '../sync/syncManager.js';
+import {
+  createSnapshot,
+  fetchSnapshots,
+  SnapshotApiError,
+  type SnapshotEntry,
+} from '../api/snapshotApi.js';
 import { CardNode, type CardNodeData } from './CardNode.js';
 import { GroupNode, type GroupNodeData } from './GroupNode.js';
 import { RelationEdge, type RelationEdgeData } from './RelationEdge.js';
@@ -36,8 +43,10 @@ import {
   makeNestIntoExistingGroupCommand,
   makeRemoveCardFromGroupCommand,
   makeSetCardPlacementCommand,
+  makeSetCardZCommand,
   makeSplitCardCommand,
   makeToggleCardCollapsedCommand,
+  makeUnmergeCardCommand,
   makeUnnestGroupCommand,
   type PositionDelta,
 } from '../stores/commands.js';
@@ -63,9 +72,12 @@ import {
 import {
   buildMergedCard,
   buildSplitCards,
+  buildUnmergeCard,
+  canUnmergeCard,
   effectivePlacement,
   MergeError,
   SplitError,
+  UnmergeError,
 } from '../domain/cards.js';
 import { CardSplitDialog } from './CardSplitDialog.js';
 import {
@@ -215,6 +227,54 @@ function CanvasViewImpl() {
     | null
   >(null);
   const [splitCardId, setSplitCardId] = useState<string | null>(null);
+  // 段階2: アプリ内スナップショット (手動作成 + 一覧)．
+  const [snapshotConnected, setSnapshotConnected] = useState<boolean>(
+    () => syncManager.getSnapshotApiTarget() !== null
+  );
+  const [snapshotBusy, setSnapshotBusy] = useState(false);
+  const [snapshotMsg, setSnapshotMsg] = useState<string | null>(null);
+  const [snapshotListOpen, setSnapshotListOpen] = useState(false);
+  const [snapshotItems, setSnapshotItems] = useState<SnapshotEntry[] | null>(null);
+  const [snapshotListError, setSnapshotListError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // 接続状態が変わったらボタンの有効/無効を更新．
+    const update = () => setSnapshotConnected(syncManager.getSnapshotApiTarget() !== null);
+    update();
+    return syncManager.on(update);
+  }, []);
+
+  const onCreateSnapshot = useCallback(async () => {
+    const label = window.prompt('スナップショットのラベル（任意）', '');
+    if (label === null) return; // キャンセル
+    setSnapshotBusy(true);
+    setSnapshotMsg(null);
+    try {
+      const entry = await createSnapshot(label.trim() || undefined);
+      setSnapshotMsg(
+        `スナップショットを作成しました（cards=${entry.counts.cards} groups=${entry.counts.groups}）`
+      );
+    } catch (e) {
+      setSnapshotMsg(
+        e instanceof SnapshotApiError ? e.message : `作成に失敗しました: ${String(e)}`
+      );
+    } finally {
+      setSnapshotBusy(false);
+    }
+  }, []);
+
+  const openSnapshotList = useCallback(async () => {
+    setSnapshotListOpen(true);
+    setSnapshotItems(null);
+    setSnapshotListError(null);
+    try {
+      setSnapshotItems(await fetchSnapshots());
+    } catch (e) {
+      setSnapshotListError(
+        e instanceof SnapshotApiError ? e.message : `取得に失敗しました: ${String(e)}`
+      );
+    }
+  }, []);
   const [pickerFor, setPickerFor] = useState<
     | { kind: 'card'; cardId: string }
     | { kind: 'group'; groupId: string }
@@ -344,7 +404,7 @@ function CanvasViewImpl() {
             mergedFrom: c.mergedFrom,
           },
           selected: isSelected,
-          zIndex: 10,
+          zIndex: 10 + (storedPos?.z ?? 0),
         };
       });
 
@@ -405,6 +465,14 @@ function CanvasViewImpl() {
       if (node.type === 'card') {
         const pos = project.data.card_positions.find((p) => p.cardId === node.id);
         if (pos) cardDragStartRef.current.set(node.id, { x: pos.x, y: pos.y });
+        // 複数選択中は選択カード全ての開始位置も記録し，DragStop で一括保存する．
+        if (selectedCardIds.length > 1 && selectedCardIds.includes(node.id)) {
+          for (const id of selectedCardIds) {
+            if (id === node.id) continue;
+            const p = project.data.card_positions.find((pp) => pp.cardId === id);
+            if (p) cardDragStartRef.current.set(id, { x: p.x, y: p.y });
+          }
+        }
       } else if (node.type === 'kjgroup') {
         const pos = project.data.group_positions.find((p) => p.groupId === node.id);
         if (pos) groupDragStartRef.current.set(node.id, { x: pos.x, y: pos.y });
@@ -414,7 +482,7 @@ function CanvasViewImpl() {
       }
       draggingRef.current.add(node.id);
     },
-    [project]
+    [project, selectedCardIds]
   );
 
   const onNodeDrag = useCallback<NodeMouseHandler>(
@@ -446,6 +514,40 @@ function CanvasViewImpl() {
         cardDragStartRef.current.delete(node.id);
         if (!from) return;
         if (Math.abs(from.x - to.x) < 1 && Math.abs(from.y - to.y) < 1) return;
+
+        // 複数選択ドラッグ: 掴んだカードと同じ delta で選択カード全てを一括移動する．
+        // React Flow は視覚的に全選択カードを動かすが，従来は掴んだ 1 枚しか
+        // 保存されず他が元に戻っていた (バグ)．bulk コマンドで全て保存する．
+        const isMulti = selectedCardIds.length > 1 && selectedCardIds.includes(node.id);
+        if (isMulti && project) {
+          const dx = to.x - from.x;
+          const dy = to.y - from.y;
+          const moves: Array<{
+            cardId: string;
+            from: { x: number; y: number };
+            to: { x: number; y: number };
+          }> = [];
+          const overrides = new Map<string, { x: number; y: number }>();
+          for (const id of selectedCardIds) {
+            const f = cardDragStartRef.current.get(id) ??
+              (id === node.id ? from : undefined);
+            cardDragStartRef.current.delete(id);
+            if (!f) continue;
+            const t = { x: f.x + dx, y: f.y + dy };
+            moves.push({ cardId: id, from: f, to: t });
+            overrides.set(id, t);
+          }
+          const cardWrapWidth = project.metadata.displaySettings?.cardWrapWidth;
+          const groupBoundsUpdates = computeCascadedGroupBoundsUpdates(
+            project.data,
+            overrides,
+            new Map(),
+            { measuredSizes: getMeasuredSizes(), defaultCardWidth: cardWrapWidth }
+          );
+          applyCommand(makeMoveCardsBulkCommand(moves, groupBoundsUpdates));
+          return;
+        }
+
         // Push the card out of any group rectangle it does not belong to.
         if (project) {
           const containers = getContainerGroupIds(project.data, node.id, 'card');
@@ -553,7 +655,7 @@ function CanvasViewImpl() {
         );
       }
     },
-    [applyCommand, project]
+    [applyCommand, project, selectedCardIds]
   );
 
   const onPaneClick = useCallback(() => {
@@ -631,6 +733,14 @@ function CanvasViewImpl() {
         applyCommand(makeSplitCardCommand(out));
         setSplitCardId(null);
         if (out.newCards.length > 0) selectCard(out.newCards[0].id);
+        // 分割後カードは元カードの配置 (placement) を継承する．未分類だと
+        // キャンバス上に現れず「見えない」ため，未分類ペインへ誘導する．
+        if (out.newCards.some((c) => (c.placement ?? 'canvas') === 'unclassified')) {
+          alert(
+            '分割後のカードは元カードと同じ「未分類」に置かれます．\n' +
+              '左の未分類ペインを確認してください（キャンバスには表示されません）．'
+          );
+        }
       } catch (e) {
         if (e instanceof SplitError) alert(e.message);
         else throw e;
@@ -655,6 +765,43 @@ function CanvasViewImpl() {
       setContextMenu(null);
     },
     [project, applyCommand]
+  );
+
+  const setCardZOrder = useCallback(
+    (cardId: string, dir: 'front' | 'back') => {
+      if (!project) return;
+      const positions = project.data.card_positions;
+      const cur = positions.find((p) => p.cardId === cardId);
+      const prevZ = cur?.z ?? 0;
+      const zs = positions.map((p) => p.z ?? 0);
+      const nextZ =
+        dir === 'front'
+          ? (zs.length > 0 ? Math.max(...zs) : 0) + 1
+          : (zs.length > 0 ? Math.min(...zs) : 0) - 1;
+      if (nextZ !== prevZ) {
+        applyCommand(
+          makeSetCardZCommand(cardId, prevZ, nextZ, dir === 'front' ? '最前面へ' : '最背面へ')
+        );
+      }
+      setContextMenu(null);
+    },
+    [project, applyCommand]
+  );
+
+  const unmergeCard = useCallback(
+    (cardId: string) => {
+      if (!project) return;
+      try {
+        const out = buildUnmergeCard(project.data, cardId);
+        applyCommand(makeUnmergeCardCommand(out));
+        if (out.restoredCards.length > 0) selectCardIds(out.restoredCards.map((c) => c.id));
+      } catch (e) {
+        if (e instanceof UnmergeError) alert(e.message);
+        else throw e;
+      }
+      setContextMenu(null);
+    },
+    [project, applyCommand, selectCardIds]
   );
 
   const removeCardFromGroupViaMenu = useCallback(
@@ -1441,10 +1588,114 @@ function CanvasViewImpl() {
             ? `結合 (${selectedCardIds.length} 枚 → 1)`
             : 'カード結合'}
         </button>
+        <button
+          type="button"
+          onClick={onCreateSnapshot}
+          disabled={!snapshotConnected || snapshotBusy}
+          title={
+            snapshotConnected
+              ? '現在の状態をサーバーにスナップショット保存（手動）'
+              : 'ルームに接続しているときに使えます'
+          }
+        >
+          {snapshotBusy ? 'スナップショット中…' : 'スナップショット作成'}
+        </button>
+        <button
+          type="button"
+          onClick={openSnapshotList}
+          disabled={!snapshotConnected}
+          title="スナップショットの一覧を表示（復元は管理者操作）"
+        >
+          スナップショット一覧
+        </button>
+        {snapshotMsg && <span className="canvas-toolbar-hint">{snapshotMsg}</span>}
         <span className="canvas-toolbar-hint">
           Shift+ドラッグで複数選択 ／ Shift+クリックで追加選択
         </span>
       </div>
+      {snapshotListOpen && (
+        <div
+          className="snapshot-modal-backdrop"
+          onClick={() => setSnapshotListOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.35)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <div
+            className="snapshot-modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--panel-bg, #fff)',
+              color: 'var(--text, #111)',
+              borderRadius: 8,
+              padding: 16,
+              width: 'min(640px, 92vw)',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 8,
+              }}
+            >
+              <strong>スナップショット一覧</strong>
+              <button type="button" onClick={() => setSnapshotListOpen(false)}>
+                閉じる
+              </button>
+            </div>
+            <p style={{ fontSize: 12, opacity: 0.75, marginTop: 0 }}>
+              自動（5分 / 20操作 / compact前）と手動のスナップショットです。
+              復元は管理者操作（サーバー側）で行います。
+            </p>
+            {snapshotListError && (
+              <p style={{ color: '#c00' }}>{snapshotListError}</p>
+            )}
+            {!snapshotListError && snapshotItems === null && <p>読み込み中…</p>}
+            {!snapshotListError && snapshotItems && snapshotItems.length === 0 && (
+              <p>スナップショットはまだありません。</p>
+            )}
+            {!snapshotListError && snapshotItems && snapshotItems.length > 0 && (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
+                    <th style={{ padding: '4px 6px' }}>日時</th>
+                    <th style={{ padding: '4px 6px' }}>種別</th>
+                    <th style={{ padding: '4px 6px' }}>作者</th>
+                    <th style={{ padding: '4px 6px' }}>ラベル</th>
+                    <th style={{ padding: '4px 6px' }}>枚数</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snapshotItems.map((s) => (
+                    <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                        {new Date(s.ts).toLocaleString()}
+                      </td>
+                      <td style={{ padding: '4px 6px' }}>{s.trigger}</td>
+                      <td style={{ padding: '4px 6px' }}>{s.author ?? '-'}</td>
+                      <td style={{ padding: '4px 6px' }}>{s.label ?? ''}</td>
+                      <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                        C{s.counts.cards}/G{s.counts.groups}/M{s.counts.memberships}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
       <div className="canvas-main">
         <div className="canvas-flow" onDrop={onDrop} onDragOver={onDragOver}>
           <ReactFlow
@@ -1526,6 +1777,21 @@ function CanvasViewImpl() {
           >
             未分類に戻す
           </button>
+          <div className="card-context-menu-sep" />
+          <button type="button" onClick={() => setCardZOrder(contextMenu.cardId, 'front')}>
+            最前面へ
+          </button>
+          <button type="button" onClick={() => setCardZOrder(contextMenu.cardId, 'back')}>
+            最背面へ
+          </button>
+          {(() => {
+            const c = project?.data.cards.find((x) => x.id === contextMenu.cardId);
+            return c && canUnmergeCard(c) ? (
+              <button type="button" onClick={() => unmergeCard(contextMenu.cardId)}>
+                統合を解除
+              </button>
+            ) : null;
+          })()}
           <div className="card-context-menu-sep" />
           <button type="button" onClick={() => openSplit(contextMenu.cardId)}>
             分割...

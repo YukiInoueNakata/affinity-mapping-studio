@@ -123,7 +123,14 @@ export function buildSearchIndex(data: ProjectData) {
   const ms = new MiniSearch<SearchDoc>({
     fields: ['title', 'body'],
     storeFields: ['kind', 'refId', 'title', 'body', 'participantId', 'groupId'],
-    searchOptions: { prefix: true, fuzzy: 0.2, boost: { title: 2 } },
+    // 数字だけのトークン (カード通し番号 024 等) は prefix / fuzzy を無効化する．
+    // 02-024 が 026 / 029 に一致してしまう誤ヒットを防ぐ (2026-07 修正)．
+    // 英字を含むトークンは従来どおり prefix + fuzzy で本文検索の緩さを維持．
+    searchOptions: {
+      prefix: (term: string) => !/^\d+$/.test(term) && term.length >= 2,
+      fuzzy: (term: string) => (/^\d+$/.test(term) ? false : 0.2),
+      boost: { title: 2 },
+    },
     tokenize: (text) => {
       const ascii = text
         .toLowerCase()
@@ -161,6 +168,60 @@ export function buildSearchIndex(data: ProjectData) {
   return ms;
 }
 
+/** カード番号らしい文字列を code 比較用に正規化する．前置の英字接頭 (P など) と
+ * 記号・空白を除き，数字ブロックのゼロ埋めを外す (024 → 24)．一致比較専用． */
+function normalizeCodeQuery(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^0-9a-z]/g, '')
+    .replace(/^[a-z]+/, '')
+    .replace(/\b0+(\d)/g, '$1');
+}
+
+/** クエリがカード番号らしい (数字を含み英字が participant 接頭のみ) ときだけ，
+ * code の完全一致/包含でカードを拾う．そうでなければ空配列． */
+function searchCardCodesExact(
+  data: ProjectData,
+  query: string,
+  filters: SearchFilters
+): SearchHit[] {
+  // 数字を 2 ブロック以上含む (024-... や 02-024) か，純数字のときだけ発動．
+  if (!/\d/.test(query)) return [];
+  const isCodeLike = /^[A-Za-z]?\s*\d+(?:\s*[-\s]\s*\d+)?$/.test(query.trim());
+  if (!isCodeLike) return [];
+  if (filters.kinds && filters.kinds.length > 0 && !filters.kinds.includes('card')) return [];
+
+  const nq = normalizeCodeQuery(query);
+  if (!nq) return [];
+  const cardGroupId = new Map<string, string>();
+  for (const m of data.group_memberships) cardGroupId.set(m.cardId, m.groupId);
+
+  const hits: SearchHit[] = [];
+  for (const c of data.cards) {
+    const nc = normalizeCodeQuery(c.code);
+    if (nc !== nq) continue;
+    if (filters.participantId !== undefined && filters.participantId !== null) {
+      if (c.participantId !== filters.participantId) continue;
+    }
+    const groupId = cardGroupId.get(c.id) ?? null;
+    if (filters.groupId !== undefined) {
+      if (filters.groupId === null && groupId !== null) continue;
+      if (filters.groupId !== null && groupId !== filters.groupId) continue;
+    }
+    hits.push({
+      id: `card:${c.id}`,
+      kind: 'card',
+      refId: c.id,
+      title: c.code,
+      bodySnippet: snippet(c.body),
+      score: Number.MAX_SAFE_INTEGER,
+      participantId: c.participantId,
+      groupId,
+    });
+  }
+  return hits;
+}
+
 export function searchProject(
   data: ProjectData,
   query: string,
@@ -168,11 +229,18 @@ export function searchProject(
 ): SearchHit[] {
   const q = query.trim();
   if (!q) return [];
+
+  // カード番号らしいクエリ (例: 02-024 / P02-024 / 024) は code の完全一致寄りに
+  // 拾い，MiniSearch の緩い一致より優先する．正規化して大小・ゼロ埋め・前置 P を無視．
+  const codeHits = searchCardCodesExact(data, q, filters);
+
   const ms = buildSearchIndex(data);
   const raw = ms.search(q);
-  const hits: SearchHit[] = [];
+  const hits: SearchHit[] = [...codeHits];
+  const seenIds = new Set(codeHits.map((h) => h.id));
   for (const r of raw) {
     const kind = r.kind as SearchHitKind;
+    if (seenIds.has(r.id as string)) continue;
     if (filters.kinds && filters.kinds.length > 0 && !filters.kinds.includes(kind)) continue;
     if (filters.participantId !== undefined && filters.participantId !== null) {
       if (r.participantId !== filters.participantId) continue;

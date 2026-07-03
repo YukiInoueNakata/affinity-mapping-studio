@@ -1064,6 +1064,64 @@ export function makeMergeCardsCommand(input: MergeCommandInput): DomainCommand {
   };
 }
 
+export interface UnmergeCommandInput {
+  mergedCard: Card;
+  mergedLinks: CardSourceLink[];
+  mergedPosition: CardPosition | null;
+  mergedMembership: GroupMembership | null;
+  restoredCards: Card[];
+  restoredLinks: CardSourceLink[];
+  restoredPositions: CardPosition[];
+  restoredMemberships: GroupMembership[];
+}
+
+/** Reverse of makeMergeCardsCommand: dissolve a merged card back into the
+ *  source cards captured in its snapshot. */
+export function makeUnmergeCardCommand(input: UnmergeCommandInput): DomainCommand {
+  const mergedLinkIds = new Set(input.mergedLinks.map((l) => l.id));
+  const restoredCardIds = new Set(input.restoredCards.map((c) => c.id));
+  const restoredLinkIds = new Set(input.restoredLinks.map((l) => l.id));
+  const restoredPosCardIds = new Set(input.restoredPositions.map((p) => p.cardId));
+  const restoredMembershipIds = new Set(input.restoredMemberships.map((m) => m.id));
+  return {
+    label: `統合を解除: ${input.mergedCard.code} → ${input.restoredCards.length} 枚`,
+    apply: (d) => ({
+      ...d,
+      cards: [...d.cards.filter((c) => c.id !== input.mergedCard.id), ...input.restoredCards],
+      card_source_links: [
+        ...d.card_source_links.filter((l) => !mergedLinkIds.has(l.id)),
+        ...input.restoredLinks,
+      ],
+      card_positions: [
+        ...d.card_positions.filter((p) => p.cardId !== input.mergedCard.id),
+        ...input.restoredPositions,
+      ],
+      group_memberships: [
+        ...d.group_memberships.filter((m) =>
+          input.mergedMembership ? m.id !== input.mergedMembership.id : true
+        ),
+        ...input.restoredMemberships,
+      ],
+    }),
+    revert: (d) => ({
+      ...d,
+      cards: [...d.cards.filter((c) => !restoredCardIds.has(c.id)), input.mergedCard],
+      card_source_links: [
+        ...d.card_source_links.filter((l) => !restoredLinkIds.has(l.id)),
+        ...input.mergedLinks,
+      ],
+      card_positions: [
+        ...d.card_positions.filter((p) => !restoredPosCardIds.has(p.cardId)),
+        ...(input.mergedPosition ? [input.mergedPosition] : []),
+      ],
+      group_memberships: [
+        ...d.group_memberships.filter((m) => !restoredMembershipIds.has(m.id)),
+        ...(input.mergedMembership ? [input.mergedMembership] : []),
+      ],
+    }),
+  };
+}
+
 export function makeEditCardBodyCommand(
   cardId: string,
   prevBody: string,
@@ -1466,6 +1524,31 @@ export function makeMoveCardCommand(
       ),
       group_positions: d.group_positions.map((p) =>
         prevById.has(p.groupId) ? prevById.get(p.groupId)! : p
+      ),
+    }),
+  };
+}
+
+/** 重なったカードの前後関係 (z) を変更する．最前面/最背面は呼び出し側で
+ *  nextZ を算出して渡す (全 card_positions の最大+1 / 最小-1)． */
+export function makeSetCardZCommand(
+  cardId: string,
+  prevZ: number,
+  nextZ: number,
+  label = '順序変更'
+): DomainCommand {
+  return {
+    label: `${label}: ${cardId}`,
+    apply: (d) => ({
+      ...d,
+      card_positions: d.card_positions.map((p) =>
+        p.cardId === cardId ? { ...p, z: nextZ } : p
+      ),
+    }),
+    revert: (d) => ({
+      ...d,
+      card_positions: d.card_positions.map((p) =>
+        p.cardId === cardId ? { ...p, z: prevZ } : p
       ),
     }),
   };

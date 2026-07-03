@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { makeEmptyProject, type ProjectFile } from '@shared/types/project';
 import type { DisplaySettings, ProjectData, ProjectMetadata } from '@shared/types/domain';
 import type { DomainCommand } from './commands.js';
+import { confirmBulkOperation, BULK_CONFIRM_THRESHOLD } from '../utils/bulkGuard.js';
 import type { YjsSyncBridge } from '../sync/yjsBridge.js';
 import {
   normalizeProjectRelations,
@@ -295,6 +296,18 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         }
       }
       return;
+    }
+    // Codex 指摘#3 (2026-07-03): 一括操作ガードをコマンド層で強制する．
+    // UI 経路以外 (alignGroupToLabel / DevTools / 別コンポーネント / 確認漏れ) でも
+    // 閾値以上の一括変更は必ず確認する．UI 側で確認済みなら bulkConfirmed=true．
+    if (
+      command.impactCount != null &&
+      command.impactCount >= BULK_CONFIRM_THRESHOLD &&
+      command.bulkConfirmed !== true
+    ) {
+      if (!confirmBulkOperation(command.impactCount, command.bulkActionLabel ?? '一括変更')) {
+        return;
+      }
     }
     const nextData = command.apply(project.data);
     const nextPast = [...past, command].slice(-MAX_HISTORY);

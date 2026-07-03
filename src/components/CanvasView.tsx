@@ -40,6 +40,7 @@ import {
   makeMoveCardCommand,
   makeMoveCardsBulkCommand,
   makeMoveGroupWithChildrenCommand,
+  markBulkConfirmed,
   makeNestGroupsCommand,
   makeNestIntoExistingGroupCommand,
   makeRemoveCardFromGroupCommand,
@@ -618,7 +619,7 @@ function CanvasViewImpl() {
             new Map(),
             { measuredSizes: getMeasuredSizes(), defaultCardWidth: cardWrapWidth }
           );
-          applyCommand(makeMoveCardsBulkCommand(moves, groupBoundsUpdates));
+          applyCommand(markBulkConfirmed(makeMoveCardsBulkCommand(moves, groupBoundsUpdates)));
           return;
         }
 
@@ -1081,7 +1082,9 @@ function CanvasViewImpl() {
         { defaultCardWidth: cardWrapWidth, measuredSizes: getMeasuredSizes() }
       );
       applyCommand(
-        makeAddCardsToGroupCommand(targetGroupId, added, replaced, groupBoundsUpdates)
+        markBulkConfirmed(
+          makeAddCardsToGroupCommand(targetGroupId, added, replaced, groupBoundsUpdates)
+        )
       );
       selectGroup(targetGroupId);
     },
@@ -1566,13 +1569,15 @@ function CanvasViewImpl() {
       }
     }
     applyCommand(
-      makeCreateGroupCommand(
-        out.group,
-        out.label,
-        finalPosition,
-        out.memberships,
-        out.conflictingMemberships,
-        cardMoves
+      markBulkConfirmed(
+        makeCreateGroupCommand(
+          out.group,
+          out.label,
+          finalPosition,
+          out.memberships,
+          out.conflictingMemberships,
+          cardMoves
+        )
       )
     );
     selectGroup(out.group.id);

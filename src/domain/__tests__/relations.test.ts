@@ -3,9 +3,13 @@ import type { ProjectData } from '@shared/types/domain';
 import {
   buildRelation,
   RELATION_TYPE_LABELS,
+  RELATION_TYPE_ORDER,
   RelationError,
   relationDisplayLabel,
   relationExists,
+  migrateRelationType,
+  normalizeProjectRelations,
+  normalizeFinalDiagramShapes,
 } from '../relations.js';
 
 const NOW = '2026-05-21T00:00:00.000Z';
@@ -123,11 +127,87 @@ describe('relationDisplayLabel', () => {
       sourceObjectId: 'a',
       targetObjectType: 'group' as const,
       targetObjectId: 'b',
-      relationType: 'contrasts_with' as const,
+      relationType: 'opposes' as const,
       memoIds: [],
       createdAt: NOW,
       updatedAt: NOW,
     };
-    expect(relationDisplayLabel(r)).toBe(RELATION_TYPE_LABELS.contrasts_with);
+    expect(relationDisplayLabel(r)).toBe(RELATION_TYPE_LABELS.opposes);
+  });
+});
+
+describe('migrateRelationType', () => {
+  it('maps every legacy key to a valid new key', () => {
+    const legacyToNew: Record<string, string> = {
+      causes: 'causes',
+      promotes: 'influences',
+      inhibits: 'influences',
+      precedes: 'presupposes',
+      follows: 'results_in',
+      contrasts_with: 'opposes',
+      supports: 'complements',
+      questions: 'refutes',
+      part_of: 'subsumes',
+      example_of: 'exemplifies',
+      abstracts: 'subsumes',
+      derived_from: 'defines',
+      co_occurs_with: 'parallels',
+      custom: 'custom',
+    };
+    for (const [legacy, expected] of Object.entries(legacyToNew)) {
+      expect(migrateRelationType(legacy)).toBe(expected);
+      expect(RELATION_TYPE_ORDER).toContain(migrateRelationType(legacy));
+    }
+  });
+
+  it('passes through new keys unchanged', () => {
+    for (const key of RELATION_TYPE_ORDER) {
+      expect(migrateRelationType(key)).toBe(key);
+    }
+  });
+
+  it('passes through decorative shape kinds unchanged', () => {
+    for (const kind of ['circle', 'rect', 'cloud', 'bracket', 'arrow_standalone', 'text']) {
+      expect(migrateRelationType(kind)).toBe(kind);
+    }
+  });
+
+  it('coerces unknown relation strings to custom', () => {
+    expect(migrateRelationType('totally_unknown')).toBe('custom');
+  });
+});
+
+describe('normalizeProjectRelations', () => {
+  it('rewrites legacy relationType in place', () => {
+    const d = emptyData();
+    d.diagram_relations.push({
+      id: 'r1',
+      sourceObjectType: 'group',
+      sourceObjectId: 'g1',
+      targetObjectType: 'group',
+      targetObjectId: 'g2',
+      relationType: 'contrasts_with' as never,
+      memoIds: [],
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    normalizeProjectRelations(d);
+    expect(d.diagram_relations[0].relationType).toBe('opposes');
+  });
+});
+
+describe('normalizeFinalDiagramShapes', () => {
+  it('migrates relation kinds but keeps decorative kinds', () => {
+    const fd = {
+      shapes: [
+        { id: 's1', kind: 'part_of' },
+        { id: 's2', kind: 'circle' },
+        { id: 's3', kind: 'mystery' },
+      ],
+    };
+    normalizeFinalDiagramShapes(fd);
+    expect(fd.shapes[0].kind).toBe('subsumes');
+    expect(fd.shapes[1].kind).toBe('circle');
+    expect(fd.shapes[2].kind).toBe('custom');
   });
 });

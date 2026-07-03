@@ -3,6 +3,10 @@ import { makeEmptyProject, type ProjectFile } from '@shared/types/project';
 import type { DisplaySettings, ProjectData, ProjectMetadata } from '@shared/types/domain';
 import type { DomainCommand } from './commands.js';
 import type { YjsSyncBridge } from '../sync/yjsBridge.js';
+import {
+  normalizeProjectRelations,
+  normalizeFinalDiagramShapes,
+} from '../domain/relations.js';
 
 const MAX_HISTORY = 200;
 
@@ -156,6 +160,17 @@ function withData(project: ProjectFile, data: ProjectData): ProjectFile {
   return { ...project, data };
 }
 
+/** 旧スキーマ（14 種）の関係種別を論文§2 分類へロード時に正規化する（破壊的・in-place）．
+ *  diagram_relations.relationType と final_diagram.shapes[].kind の両方を対象． */
+function migrateRelationSchema(
+  data?: ProjectData | null,
+  metadata?: ProjectMetadata | null
+): void {
+  if (data) normalizeProjectRelations(data);
+  const fd = (metadata as { final_diagram?: unknown } | null | undefined)?.final_diagram;
+  if (fd) normalizeFinalDiagramShapes(fd);
+}
+
 export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   filePath: null,
   project: null,
@@ -207,6 +222,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   },
 
   loadProject(filePath, project) {
+    migrateRelationSchema(project?.data, project?.metadata);
     set({
       filePath,
       project,
@@ -452,6 +468,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     if (!snap) return;
     // Deep-clone so the active store does not share refs with the stored snapshot
     const restoredData = JSON.parse(JSON.stringify(snap.data));
+    migrateRelationSchema(restoredData, project.metadata);
     set({
       project: withData(project, restoredData),
       past: [],
@@ -527,6 +544,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       });
       _applyingRemote = true;
       try {
+        migrateRelationSchema(remoteData, remoteMeta as ProjectMetadata | null);
         if (cur) {
           // Codex-W2: remote の metadata 変更 (名称 / displaySettings 等) も反映する．
           set({
@@ -575,6 +593,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     try {
       const data = bridge.toProjectData();
       const meta = bridge.toMetadata();
+      migrateRelationSchema(data, meta as ProjectMetadata | null);
       if (cur) {
         set({
           project: {

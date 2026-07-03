@@ -368,34 +368,36 @@ function nameForObject(
 }
 
 function relationTypeToVerb(rt: string): string {
-  // Compact narrative-friendly verbs
+  // Compact narrative-friendly verbs (論文§2 分類)
   switch (rt) {
+    case 'subsumes':
+      return 'を包摂する';
+    case 'exemplifies':
+      return 'を例示する';
+    case 'refutes':
+      return 'を反証する';
+    case 'complements':
+      return 'を補完する';
+    case 'opposes':
+      return '対立する';
+    case 'parallels':
+      return 'と並列する';
     case 'causes':
       return '因果的に結びつく';
-    case 'promotes':
-      return '促進する';
-    case 'inhibits':
-      return '抑制する';
-    case 'precedes':
+    case 'results_in':
+      return 'に帰結する';
+    case 'presupposes':
       return '前提となる';
-    case 'follows':
-      return '後続する';
-    case 'contrasts_with':
-      return '対立的な';
-    case 'supports':
-      return '支持する';
-    case 'questions':
-      return '疑問を投げかける';
-    case 'part_of':
-      return '含意される';
-    case 'example_of':
-      return 'を具体例とする';
-    case 'abstracts':
-      return 'を抽象化する';
-    case 'derived_from':
-      return 'から派生する';
-    case 'co_occurs_with':
-      return '同時に出現する';
+    case 'conditions':
+      return 'の条件となる';
+    case 'synonymous':
+      return 'と同義である';
+    case 'similar':
+      return 'と類似する';
+    case 'influences':
+      return 'に影響する';
+    case 'defines':
+      return 'を規定する';
     default:
       return '関連する';
   }

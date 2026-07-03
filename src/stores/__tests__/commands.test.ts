@@ -134,10 +134,10 @@ describe('diagram relation commands', () => {
     const cmd = makeEditRelationCommand(
       REL.id,
       { relationType: 'causes', label: undefined },
-      { relationType: 'contrasts_with', label: 'A vs B', now: NOW }
+      { relationType: 'opposes', label: 'A vs B', now: NOW }
     );
     const after = cmd.apply(d);
-    expect(after.diagram_relations[0].relationType).toBe('contrasts_with');
+    expect(after.diagram_relations[0].relationType).toBe('opposes');
     expect(after.diagram_relations[0].label).toBe('A vs B');
     const back = cmd.revert(after);
     expect(back.diagram_relations[0].relationType).toBe('causes');

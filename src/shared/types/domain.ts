@@ -329,19 +329,20 @@ export type DiagramObjectType =
   | 'memo';
 
 export type DiagramRelationType =
+  | 'subsumes'
+  | 'exemplifies'
+  | 'refutes'
+  | 'complements'
+  | 'opposes'
+  | 'parallels'
   | 'causes'
-  | 'promotes'
-  | 'inhibits'
-  | 'precedes'
-  | 'follows'
-  | 'contrasts_with'
-  | 'supports'
-  | 'questions'
-  | 'part_of'
-  | 'example_of'
-  | 'abstracts'
-  | 'derived_from'
-  | 'co_occurs_with'
+  | 'results_in'
+  | 'presupposes'
+  | 'conditions'
+  | 'synonymous'
+  | 'similar'
+  | 'influences'
+  | 'defines'
   | 'custom';
 
 // ---- GTA tables (Phase 1.5c) ----

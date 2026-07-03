@@ -39,6 +39,21 @@ export interface DomainCommand {
    *  append-only な書き込みに限定する．Edit / Delete はオーナーシップ判定が
    *  ないため安全側に倒して false のまま． */
   readonly viewerAllowed?: boolean;
+  /** Codex 指摘#3 (2026-07-03): 一括ガードをコマンド層へ．
+   *  この操作が変更する card / membership の件数．applyCommand が
+   *  BULK_CONFIRM_THRESHOLD 以上かつ bulkConfirmed でないとき確認を挟む．
+   *  UI 経路以外 (DevTools / 別コンポーネント / 確認漏れ経路) もこの層でカバーする． */
+  readonly impactCount?: number;
+  /** すでに UI 側で確認済みのとき true（applyCommand 層で二重確認しない）． */
+  readonly bulkConfirmed?: boolean;
+  /** 一括確認ダイアログに出す操作名（例 '一括で移動' / '1 つのグループにまとめ'）． */
+  readonly bulkActionLabel?: string;
+}
+
+/** Codex 指摘#3: コマンドを「確認済み」にして返す．UI 側で既に確認を取った
+ *  経路が applyCommand 層で二重に確認されないようにするためのヘルパー． */
+export function markBulkConfirmed<T extends DomainCommand>(cmd: T): T {
+  return { ...cmd, bulkConfirmed: true };
 }
 
 export function makeAddParticipantCommand(participant: Participant): DomainCommand {
@@ -1475,6 +1490,8 @@ export function makeMoveCardsBulkCommand(
   const prevGroupById = new Map(groupBoundsUpdates.map((u) => [u.prev.groupId, u.prev]));
   return {
     label: `カード一括移動: ${moves.length} 枚`,
+    impactCount: moves.length,
+    bulkActionLabel: '一括で移動',
     apply: (d) => ({
       ...d,
       card_positions: d.card_positions.map((p) => {
@@ -1573,6 +1590,9 @@ export function makeCreateGroupCommand(
   const moveFrom = new Map(cardMoves.map((m) => [m.cardId, m.from]));
   return {
     label: `グループ作成: ${group.name}`,
+    // Codex#3: 新規メンバーシップ数と付替(replaced)・カード移動のうち最大を影響件数とする．
+    impactCount: Math.max(memberships.length, replacedMemberships.length, cardMoves.length),
+    bulkActionLabel: '1 つのグループにまとめ',
     apply: (d) => ({
       ...d,
       groups: [...d.groups, group],
@@ -1684,6 +1704,8 @@ export function makeAddCardsToGroupCommand(
   const prevById = new Map(groupBoundsUpdates.map((u) => [u.prev.groupId, u.prev]));
   return {
     label: `カードを既存グループへ追加: ${groupId} (+${newMemberships.length})`,
+    impactCount: Math.max(newMemberships.length, replacedMemberships.length),
+    bulkActionLabel: 'グループに編入',
     apply: (d) => ({
       ...d,
       group_memberships: [

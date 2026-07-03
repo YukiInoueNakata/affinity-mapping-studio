@@ -34,6 +34,10 @@ const MESSAGE_KJ_META = 2;
 // granted (no-server-support) にフォールバック (従来の seedOwner LWW で動作・後方互換)．
 const MESSAGE_SEED_CLAIM = 3;
 
+// Codex 指摘#8 (2026-07-03): サーバーが snapshot restore 時に接続を閉じる close code．
+// クライアントは auth-denied ではなく「復元による切断」として自動再接続する．
+const CLOSE_ROOM_RESTORED = 4012;
+
 // Sec-008 (2026-06-03): WS subprotocol．サーバーは receive-only で問題なし．
 // 厳格モード (KJ_REQUIRE_KJ_STUDIO_PROTOCOL=true) のサーバーでもこの subprotocol で通過する．
 const KJ_STUDIO_SUBPROTOCOL = 'kj-studio.v1';
@@ -190,6 +194,21 @@ export class YjsWebsocketProvider {
       this.emit({ type: 'error', error: new Error('WebSocket error') });
     };
     socket.onclose = (ev) => {
+      // Codex 指摘#8 (2026-07-03): 4012 = room-restored．
+      // サーバーが snapshot restore を実行し，接続を一旦切って epoch を更新した合図．
+      // auth-denied ではなく「復元による切断」として自動再接続する．再接続時は
+      // サーバーが rotate した epoch により既存のキャッシュ無効化→復元状態を取得する．
+      if (ev.code === CLOSE_ROOM_RESTORED) {
+        this.setStatus('disconnected', 'サーバーで復元が行われました．再接続します．');
+        this.ws = null;
+        this.synced = false;
+        this.emit({ type: 'sync', synced: false });
+        if (this.opts.autoReconnect !== false && !this.destroyed) {
+          this.reconnectAttempt = 0; // 復元は障害ではないので即時再接続
+          this.scheduleReconnect();
+        }
+        return;
+      }
       // CA1 (2026-06-09): 4xxx range は サーバーが reason 細分化して送ってくる
       // (KJ Studio Server v0.2.x+)
       if (ev.code >= 4000 && ev.code < 4100) {

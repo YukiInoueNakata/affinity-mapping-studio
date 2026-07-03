@@ -1,7 +1,7 @@
 {
   "name": "affinity-mapping-studio",
   "private": true,
-  "version": "0.2.26",
+  "version": "0.2.27",
   "description": "Affinity Mapping Studio (Tauri 統合版).",
   "type": "module",
   "scripts": {

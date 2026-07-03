@@ -3,9 +3,12 @@ import {
   buildCard,
   buildMergedCard,
   buildSplitCards,
+  buildUnmergeCard,
+  canUnmergeCard,
   MergeError,
   nextCardSerial,
   SplitError,
+  UnmergeError,
 } from '../cards.js';
 import type { ProjectData, Participant, SourceSegment } from '@shared/types/domain';
 
@@ -310,7 +313,7 @@ describe('buildSplitCards', () => {
     return data;
   }
 
-  it('splits a card into N parts with sequential card codes', () => {
+  it('splits a card: first part keeps the original code, rest get new serials', () => {
     const data = setupOneCard('AAA\nBBB\nCCC');
     const out = buildSplitCards(data, {
       cardId: 'c1',
@@ -318,7 +321,9 @@ describe('buildSplitCards', () => {
       now: NOW,
     });
     expect(out.newCards).toHaveLength(3);
-    expect(out.newCards.map((c) => c.code)).toEqual(['P01-002', 'P01-003', 'P01-004']);
+    // 先頭は元カードの番号 (P01-001) を維持，2 枚目以降のみ新規採番．
+    expect(out.newCards.map((c) => c.code)).toEqual(['P01-001', 'P01-002', 'P01-003']);
+    expect(out.newCards[0].serialNumber).toBe(out.oldCard.serialNumber);
     expect(out.newCards.map((c) => c.body)).toEqual(['AAA', 'BBB', 'CCC']);
     expect(out.oldCard.id).toBe('c1');
   });
@@ -366,5 +371,107 @@ describe('buildSplitCards', () => {
     expect(() =>
       buildSplitCards(data, { cardId: 'c1', bodyParts: ['AAA', '   '], now: NOW })
     ).toThrow(SplitError);
+  });
+});
+
+describe('buildUnmergeCard', () => {
+  const NOW = '2026-05-21T00:00:00.000Z';
+  function setupTwoCards(): ProjectData {
+    const data = emptyData();
+    const part = p('P01');
+    data.participants.push(part);
+    data.cards.push(
+      { id: 'c1', participantId: part.id, code: 'P01-001', serialNumber: 1, body: 'カード1', status: 'active', createdAt: NOW, updatedAt: NOW },
+      { id: 'c2', participantId: part.id, code: 'P01-002', serialNumber: 2, body: 'カード2', status: 'active', createdAt: NOW, updatedAt: NOW }
+    );
+    data.card_positions.push({ cardId: 'c1', x: 100, y: 100 }, { cardId: 'c2', x: 200, y: 200 });
+    data.card_source_links.push(
+      { id: 'l1', cardId: 'c1', segmentId: 'seg-1', startOffset: 0, endOffset: 5, selectedTextSnapshot: 'A', createdAt: NOW },
+      { id: 'l2', cardId: 'c2', segmentId: 'seg-2', startOffset: 0, endOffset: 5, selectedTextSnapshot: 'B', createdAt: NOW }
+    );
+    return data;
+  }
+
+  /** Apply a merge output to produce the post-merge ProjectData (mirrors makeMergeCardsCommand.apply). */
+  function applyMerge(data: ProjectData, out: ReturnType<typeof buildMergedCard>): ProjectData {
+    const oldIds = new Set(out.oldCards.map((c) => c.id));
+    const oldLinkIds = new Set(out.oldLinks.map((l) => l.id));
+    const oldPosIds = new Set(out.oldPositions.map((pp) => pp.cardId));
+    const oldMemIds = new Set(out.oldMemberships.map((m) => m.id));
+    return {
+      ...data,
+      cards: [...data.cards.filter((c) => !oldIds.has(c.id)), out.newCard],
+      card_source_links: [...data.card_source_links.filter((l) => !oldLinkIds.has(l.id)), ...out.newLinks],
+      card_positions: [...data.card_positions.filter((pp) => !oldPosIds.has(pp.cardId)), out.newPosition],
+      group_memberships: [
+        ...data.group_memberships.filter((m) => !oldMemIds.has(m.id)),
+        ...(out.newMembership ? [out.newMembership] : []),
+      ],
+    };
+  }
+
+  it('round-trips: merge then unmerge restores the original cards / links / positions', () => {
+    const data = setupTwoCards();
+    const merged = buildMergedCard(data, { cardIds: ['c1', 'c2'], now: NOW });
+    const post = applyMerge(data, merged);
+
+    const un = buildUnmergeCard(post, merged.newCard.id);
+    expect(un.restoredCards.map((c) => c.id).sort()).toEqual(['c1', 'c2']);
+    expect(un.restoredCards.map((c) => c.code).sort()).toEqual(['P01-001', 'P01-002']);
+    expect(un.restoredCards.map((c) => c.body).sort()).toEqual(['カード1', 'カード2']);
+    expect(un.restoredPositions.map((pp) => pp.cardId).sort()).toEqual(['c1', 'c2']);
+    expect(un.restoredLinks.map((l) => l.id).sort()).toEqual(['l1', 'l2']);
+    expect(un.mergedCard.id).toBe(merged.newCard.id);
+  });
+
+  it('throws when the card is neither merged nor has a snapshot', () => {
+    const data = setupTwoCards();
+    expect(() => buildUnmergeCard(data, 'c1')).toThrow(UnmergeError);
+  });
+
+  it('legacy path: reconstructs source cards from mergedFrom + links (selectedTextSnapshot)', () => {
+    // giro2026 実データ相当: mergedSnapshot 無し・mergedFrom あり・links に元テキスト．
+    const data = emptyData();
+    const part = p('P02');
+    data.participants.push(part);
+    data.cards.push({
+      id: 'merged1',
+      participantId: part.id,
+      code: 'P02-047',
+      serialNumber: 47,
+      body: 'ここは統合後の本文全体',
+      status: 'active',
+      placement: 'canvas',
+      mergedFrom: [27, 28],
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    data.card_positions.push({ cardId: 'merged1', x: 500, y: 400 });
+    data.card_source_links.push(
+      { id: 'lk1', cardId: 'merged1', segmentId: 's1', startOffset: 0, endOffset: 4, selectedTextSnapshot: '元テキストA', createdAt: NOW },
+      { id: 'lk2', cardId: 'merged1', segmentId: 's2', startOffset: 10, endOffset: 14, selectedTextSnapshot: '元テキストB', createdAt: NOW }
+    );
+
+    const un = buildUnmergeCard(data, 'merged1');
+    expect(un.restoredCards).toHaveLength(2);
+    expect(un.restoredCards.map((c) => c.serialNumber)).toEqual([27, 28]);
+    expect(un.restoredCards.map((c) => c.code)).toEqual(['P02-027', 'P02-028']);
+    expect(un.restoredCards.map((c) => c.body)).toEqual(['元テキストA', '元テキストB']);
+    // links are reassigned to the restored cards.
+    expect(un.restoredLinks).toHaveLength(2);
+    expect(new Set(un.restoredLinks.map((l) => l.cardId))).toEqual(
+      new Set(un.restoredCards.map((c) => c.id))
+    );
+    expect(un.mergedCard.id).toBe('merged1');
+  });
+
+  it('canUnmergeCard: true for snapshot or legacy mergedFrom, false otherwise', () => {
+    const data = setupTwoCards();
+    expect(canUnmergeCard(data.cards[0])).toBe(false);
+    const merged = buildMergedCard(data, { cardIds: ['c1', 'c2'], now: NOW });
+    expect(canUnmergeCard(merged.newCard)).toBe(true); // snapshot
+    expect(
+      canUnmergeCard({ ...data.cards[0], mergedFrom: [1, 2] })
+    ).toBe(true); // legacy
   });
 });

@@ -36,8 +36,10 @@ import {
   makeNestIntoExistingGroupCommand,
   makeRemoveCardFromGroupCommand,
   makeSetCardPlacementCommand,
+  makeSetCardZCommand,
   makeSplitCardCommand,
   makeToggleCardCollapsedCommand,
+  makeUnmergeCardCommand,
   makeUnnestGroupCommand,
   type PositionDelta,
 } from '../stores/commands.js';
@@ -63,9 +65,12 @@ import {
 import {
   buildMergedCard,
   buildSplitCards,
+  buildUnmergeCard,
+  canUnmergeCard,
   effectivePlacement,
   MergeError,
   SplitError,
+  UnmergeError,
 } from '../domain/cards.js';
 import { CardSplitDialog } from './CardSplitDialog.js';
 import {
@@ -344,7 +349,7 @@ function CanvasViewImpl() {
             mergedFrom: c.mergedFrom,
           },
           selected: isSelected,
-          zIndex: 10,
+          zIndex: 10 + (storedPos?.z ?? 0),
         };
       });
 
@@ -405,6 +410,14 @@ function CanvasViewImpl() {
       if (node.type === 'card') {
         const pos = project.data.card_positions.find((p) => p.cardId === node.id);
         if (pos) cardDragStartRef.current.set(node.id, { x: pos.x, y: pos.y });
+        // 複数選択中は選択カード全ての開始位置も記録し，DragStop で一括保存する．
+        if (selectedCardIds.length > 1 && selectedCardIds.includes(node.id)) {
+          for (const id of selectedCardIds) {
+            if (id === node.id) continue;
+            const p = project.data.card_positions.find((pp) => pp.cardId === id);
+            if (p) cardDragStartRef.current.set(id, { x: p.x, y: p.y });
+          }
+        }
       } else if (node.type === 'kjgroup') {
         const pos = project.data.group_positions.find((p) => p.groupId === node.id);
         if (pos) groupDragStartRef.current.set(node.id, { x: pos.x, y: pos.y });
@@ -414,7 +427,7 @@ function CanvasViewImpl() {
       }
       draggingRef.current.add(node.id);
     },
-    [project]
+    [project, selectedCardIds]
   );
 
   const onNodeDrag = useCallback<NodeMouseHandler>(
@@ -446,6 +459,40 @@ function CanvasViewImpl() {
         cardDragStartRef.current.delete(node.id);
         if (!from) return;
         if (Math.abs(from.x - to.x) < 1 && Math.abs(from.y - to.y) < 1) return;
+
+        // 複数選択ドラッグ: 掴んだカードと同じ delta で選択カード全てを一括移動する．
+        // React Flow は視覚的に全選択カードを動かすが，従来は掴んだ 1 枚しか
+        // 保存されず他が元に戻っていた (バグ)．bulk コマンドで全て保存する．
+        const isMulti = selectedCardIds.length > 1 && selectedCardIds.includes(node.id);
+        if (isMulti && project) {
+          const dx = to.x - from.x;
+          const dy = to.y - from.y;
+          const moves: Array<{
+            cardId: string;
+            from: { x: number; y: number };
+            to: { x: number; y: number };
+          }> = [];
+          const overrides = new Map<string, { x: number; y: number }>();
+          for (const id of selectedCardIds) {
+            const f = cardDragStartRef.current.get(id) ??
+              (id === node.id ? from : undefined);
+            cardDragStartRef.current.delete(id);
+            if (!f) continue;
+            const t = { x: f.x + dx, y: f.y + dy };
+            moves.push({ cardId: id, from: f, to: t });
+            overrides.set(id, t);
+          }
+          const cardWrapWidth = project.metadata.displaySettings?.cardWrapWidth;
+          const groupBoundsUpdates = computeCascadedGroupBoundsUpdates(
+            project.data,
+            overrides,
+            new Map(),
+            { measuredSizes: getMeasuredSizes(), defaultCardWidth: cardWrapWidth }
+          );
+          applyCommand(makeMoveCardsBulkCommand(moves, groupBoundsUpdates));
+          return;
+        }
+
         // Push the card out of any group rectangle it does not belong to.
         if (project) {
           const containers = getContainerGroupIds(project.data, node.id, 'card');
@@ -553,7 +600,7 @@ function CanvasViewImpl() {
         );
       }
     },
-    [applyCommand, project]
+    [applyCommand, project, selectedCardIds]
   );
 
   const onPaneClick = useCallback(() => {
@@ -631,6 +678,14 @@ function CanvasViewImpl() {
         applyCommand(makeSplitCardCommand(out));
         setSplitCardId(null);
         if (out.newCards.length > 0) selectCard(out.newCards[0].id);
+        // 分割後カードは元カードの配置 (placement) を継承する．未分類だと
+        // キャンバス上に現れず「見えない」ため，未分類ペインへ誘導する．
+        if (out.newCards.some((c) => (c.placement ?? 'canvas') === 'unclassified')) {
+          alert(
+            '分割後のカードは元カードと同じ「未分類」に置かれます．\n' +
+              '左の未分類ペインを確認してください（キャンバスには表示されません）．'
+          );
+        }
       } catch (e) {
         if (e instanceof SplitError) alert(e.message);
         else throw e;
@@ -655,6 +710,43 @@ function CanvasViewImpl() {
       setContextMenu(null);
     },
     [project, applyCommand]
+  );
+
+  const setCardZOrder = useCallback(
+    (cardId: string, dir: 'front' | 'back') => {
+      if (!project) return;
+      const positions = project.data.card_positions;
+      const cur = positions.find((p) => p.cardId === cardId);
+      const prevZ = cur?.z ?? 0;
+      const zs = positions.map((p) => p.z ?? 0);
+      const nextZ =
+        dir === 'front'
+          ? (zs.length > 0 ? Math.max(...zs) : 0) + 1
+          : (zs.length > 0 ? Math.min(...zs) : 0) - 1;
+      if (nextZ !== prevZ) {
+        applyCommand(
+          makeSetCardZCommand(cardId, prevZ, nextZ, dir === 'front' ? '最前面へ' : '最背面へ')
+        );
+      }
+      setContextMenu(null);
+    },
+    [project, applyCommand]
+  );
+
+  const unmergeCard = useCallback(
+    (cardId: string) => {
+      if (!project) return;
+      try {
+        const out = buildUnmergeCard(project.data, cardId);
+        applyCommand(makeUnmergeCardCommand(out));
+        if (out.restoredCards.length > 0) selectCardIds(out.restoredCards.map((c) => c.id));
+      } catch (e) {
+        if (e instanceof UnmergeError) alert(e.message);
+        else throw e;
+      }
+      setContextMenu(null);
+    },
+    [project, applyCommand, selectCardIds]
   );
 
   const removeCardFromGroupViaMenu = useCallback(
@@ -1526,6 +1618,21 @@ function CanvasViewImpl() {
           >
             未分類に戻す
           </button>
+          <div className="card-context-menu-sep" />
+          <button type="button" onClick={() => setCardZOrder(contextMenu.cardId, 'front')}>
+            最前面へ
+          </button>
+          <button type="button" onClick={() => setCardZOrder(contextMenu.cardId, 'back')}>
+            最背面へ
+          </button>
+          {(() => {
+            const c = project?.data.cards.find((x) => x.id === contextMenu.cardId);
+            return c && canUnmergeCard(c) ? (
+              <button type="button" onClick={() => unmergeCard(contextMenu.cardId)}>
+                統合を解除
+              </button>
+            ) : null;
+          })()}
           <div className="card-context-menu-sep" />
           <button type="button" onClick={() => openSplit(contextMenu.cardId)}>
             分割...

@@ -127,6 +127,13 @@ export function buildMergedCard(data: ProjectData, input: MergeCardsInput): Merg
     placement: 'canvas',
     // (#7) record the source serials so the UI can show "← 003,005"
     mergedFrom: sortedOld.map((c) => c.serialNumber),
+    // Full reversal snapshot so the merge can be undone any time via "統合を解除".
+    mergedSnapshot: {
+      cards: sortedOld,
+      links: oldLinks,
+      positions: oldPositions,
+      memberships: oldMemberships,
+    },
     createdAt: input.now,
     updatedAt: input.now,
   };
@@ -158,6 +165,154 @@ export function buildMergedCard(data: ProjectData, input: MergeCardsInput): Merg
     oldLinks,
     oldPositions,
     oldMemberships,
+  };
+}
+
+export class UnmergeError extends Error {}
+
+export interface UnmergeCardOutput {
+  /** The merged card being dissolved. */
+  mergedCard: Card;
+  /** Its links / position / membership to remove. */
+  mergedLinks: CardSourceLink[];
+  mergedPosition: CardPosition | null;
+  mergedMembership: GroupMembership | null;
+  /** The source cards (and their data) to restore. */
+  restoredCards: Card[];
+  restoredLinks: CardSourceLink[];
+  restoredPositions: CardPosition[];
+  restoredMemberships: GroupMembership[];
+}
+
+/** Whether a card can be un-merged: either it carries a full snapshot
+ * (0.2.25+ merges) or it is a legacy merge (mergedFrom) reconstructable from
+ * its source links. */
+export function canUnmergeCard(card: Card): boolean {
+  if (card.mergedSnapshot && card.mergedSnapshot.cards.length > 0) return true;
+  if (card.mergedFrom && card.mergedFrom.length > 0) return true;
+  return false;
+}
+
+/** Reverse a card merge.
+ *
+ * Two paths:
+ *  - Snapshot path (0.2.25+): restore the exact pre-merge cards from
+ *    `mergedSnapshot`.
+ *  - Legacy path (pre-0.2.25 merges that only have `mergedFrom`): reconstruct
+ *    the source cards from `mergedFrom` + the merged card's source links.
+ *    NOTE: the reconstructed body uses each link's `selectedTextSnapshot`
+ *    (falling back to the referenced source segment slice).  This is an
+ *    approximation: any edits made to the merged card's body AFTER the merge
+ *    are not split back onto the individual cards. */
+export function buildUnmergeCard(data: ProjectData, cardId: string): UnmergeCardOutput {
+  const mergedCard = data.cards.find((c) => c.id === cardId);
+  if (!mergedCard) throw new UnmergeError('カードが見つかりません');
+
+  const mergedLinks = data.card_source_links.filter((l) => l.cardId === cardId);
+  const mergedPosition = data.card_positions.find((p) => p.cardId === cardId) ?? null;
+  const mergedMembership = data.group_memberships.find((m) => m.cardId === cardId) ?? null;
+
+  const snap = mergedCard.mergedSnapshot;
+  if (snap && snap.cards.length > 0) {
+    return {
+      mergedCard,
+      mergedLinks,
+      mergedPosition,
+      mergedMembership,
+      restoredCards: snap.cards,
+      restoredLinks: snap.links,
+      restoredPositions: snap.positions,
+      restoredMemberships: snap.memberships,
+    };
+  }
+
+  // Legacy reconstruction from mergedFrom + links.
+  const serials = mergedCard.mergedFrom;
+  if (!serials || serials.length === 0) {
+    throw new UnmergeError(
+      'このカードは統合解除できません（統合時の元データが保存されていません）．\n' +
+        'このセッション内であれば Undo で戻せる場合があります．'
+    );
+  }
+  const participant = data.participants.find((p) => p.id === mergedCard.participantId);
+  if (!participant) throw new UnmergeError('参加者情報が見つかりません');
+
+  const sortedSerials = serials.slice().sort((a, b) => a - b);
+  const sortedLinks = mergedLinks
+    .slice()
+    .sort((a, b) => a.startOffset - b.startOffset);
+  const segById = new Map(data.source_segments.map((s) => [s.id, s]));
+  const basePos =
+    mergedPosition ?? {
+      cardId: mergedCard.id,
+      ...nextCardPositionForParticipant(data, mergedCard.participantId),
+    };
+
+  const restoredCards: Card[] = [];
+  const restoredLinks: CardSourceLink[] = [];
+  const restoredPositions: CardPosition[] = [];
+  const restoredMemberships: GroupMembership[] = [];
+
+  for (let i = 0; i < sortedSerials.length; i++) {
+    const serial = sortedSerials[i];
+    const link = sortedLinks[i]; // undefined if fewer links than serials
+    let body = '';
+    if (link) {
+      const snapText = (link.selectedTextSnapshot ?? '').trim();
+      if (snapText.length > 0) {
+        body = link.selectedTextSnapshot;
+      } else {
+        const seg = segById.get(link.segmentId);
+        if (seg) body = seg.text.slice(link.startOffset, link.endOffset);
+      }
+    }
+    const newCardId = newId();
+    restoredCards.push({
+      id: newCardId,
+      participantId: mergedCard.participantId,
+      code: formatCardCode(participant.code, serial),
+      serialNumber: serial,
+      body,
+      status: 'active',
+      placement: mergedCard.placement,
+      createdAt: mergedCard.createdAt,
+      updatedAt: mergedCard.updatedAt,
+    });
+    restoredPositions.push({
+      cardId: newCardId,
+      x: basePos.x + i * 28,
+      y: basePos.y + i * 28,
+    });
+    if (link) {
+      restoredLinks.push({
+        id: newId(),
+        cardId: newCardId,
+        segmentId: link.segmentId,
+        startOffset: link.startOffset,
+        endOffset: link.endOffset,
+        selectedTextSnapshot: link.selectedTextSnapshot,
+        createdAt: mergedCard.createdAt,
+      });
+    }
+    if (mergedMembership) {
+      restoredMemberships.push({
+        id: newId(),
+        cardId: newCardId,
+        groupId: mergedMembership.groupId,
+        createdAt: mergedCard.createdAt,
+      });
+    }
+  }
+
+  return {
+    mergedCard,
+    mergedLinks,
+    mergedPosition,
+    mergedMembership,
+    restoredCards,
+    restoredLinks,
+    restoredPositions,
+    restoredMemberships,
   };
 }
 
@@ -198,6 +353,8 @@ export function buildSplitCards(data: ProjectData, input: SplitCardInput): Split
     cardId: oldCard.id,
     ...nextCardPositionForParticipant(data, oldCard.participantId),
   };
+  // 先頭カードは元カードの通し番号 / コードを引き継ぐ (元番号を維持)．
+  // 2 枚目以降のみ新規採番する．元 serial は元カード削除で解放されるため衝突しない．
   const baseSerial = nextCardSerial(data, oldCard.participantId);
 
   const newCards: Card[] = [];
@@ -206,11 +363,12 @@ export function buildSplitCards(data: ProjectData, input: SplitCardInput): Split
   const newMemberships: GroupMembership[] = [];
   for (let i = 0; i < trimmedParts.length; i++) {
     const cardId = newId();
-    const serial = baseSerial + i;
+    const serial = i === 0 ? oldCard.serialNumber : baseSerial + (i - 1);
+    const code = i === 0 ? oldCard.code : formatCardCode(participant.code, serial);
     newCards.push({
       id: cardId,
       participantId: oldCard.participantId,
-      code: formatCardCode(participant.code, serial),
+      code,
       serialNumber: serial,
       body: trimmedParts[i],
       status: 'active',

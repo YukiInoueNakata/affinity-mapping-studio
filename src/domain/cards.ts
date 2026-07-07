@@ -127,6 +127,9 @@ export function buildMergedCard(data: ProjectData, input: MergeCardsInput): Merg
     placement: 'canvas',
     // (#7) record the source serials so the UI can show "← 003,005"
     mergedFrom: sortedOld.map((c) => c.serialNumber),
+    // 0.2.28+: 分割由来の階層コード (P02-020-01) は serial から再現できないため，
+    // 表示用に元カードの code 自体も保存する (表示はこちらを優先)．
+    mergedFromCodes: sortedOld.map((c) => c.code),
     // Full reversal snapshot so the merge can be undone any time via "統合を解除".
     mergedSnapshot: {
       cards: sortedOld,
@@ -227,6 +230,10 @@ export function buildUnmergeCard(data: ProjectData, cardId: string): UnmergeCard
   }
 
   // Legacy reconstruction from mergedFrom + links.
+  // 注意: この経路は code を formatCardCode(serial) で復元するため，分割由来の
+  // 階層コード (P02-020-01) は再現できない．0.2.25+ の merge は必ず
+  // mergedSnapshot を持ち上の snapshot 経路 (code をそのまま保持) を通るので，
+  // 実際にここへ来るのは分割階層コード導入前の legacy データのみ．
   const serials = mergedCard.mergedFrom;
   if (!serials || serials.length === 0) {
     throw new UnmergeError(
@@ -342,6 +349,11 @@ export function buildSplitCards(data: ProjectData, input: SplitCardInput): Split
   if (trimmedParts.length < 2) {
     throw new SplitError('分割後のカードが 2 枚以上になるよう本文を区切ってください');
   }
+  // 階層コードの分割連番は 2 桁固定 (-01〜-99)．100 枚以上は桁が崩れ
+  // code の辞書順ソートが壊れるため上限を設ける．
+  if (trimmedParts.length > 99) {
+    throw new SplitError('一度に分割できるのは 99 枚までです');
+  }
   const participant = data.participants.find((p) => p.id === oldCard.participantId);
   if (!participant) throw new SplitError('参加者情報が見つかりません');
 
@@ -353,8 +365,13 @@ export function buildSplitCards(data: ProjectData, input: SplitCardInput): Split
     cardId: oldCard.id,
     ...nextCardPositionForParticipant(data, oldCard.participantId),
   };
-  // 先頭カードは元カードの通し番号 / コードを引き継ぐ (元番号を維持)．
-  // 2 枚目以降のみ新規採番する．元 serial は元カード削除で解放されるため衝突しない．
+  // 分割後の子カードは「元カードのコードを親とする階層 ID」を持つ:
+  //   P02-020 を 3 分割 → P02-020-01 / P02-020-02 / P02-020-03
+  //   子をさらに分割 → P02-020-01-01 / P02-020-01-02 … と深くなる．
+  // これにより「分割前の情報 (どのカードを割ったか)」が ID 自体に残る．
+  // 内部 serialNumber はソート/採番用に新規採番する (元 serial は永久欠番として
+  // 再利用しない)．code と serialNumber はここで意図的に分離する — 以降 code は
+  // formatCardCode(serial) と一致しない点に注意．
   const baseSerial = nextCardSerial(data, oldCard.participantId);
 
   const newCards: Card[] = [];
@@ -363,8 +380,8 @@ export function buildSplitCards(data: ProjectData, input: SplitCardInput): Split
   const newMemberships: GroupMembership[] = [];
   for (let i = 0; i < trimmedParts.length; i++) {
     const cardId = newId();
-    const serial = i === 0 ? oldCard.serialNumber : baseSerial + (i - 1);
-    const code = i === 0 ? oldCard.code : formatCardCode(participant.code, serial);
+    const serial = baseSerial + i;
+    const code = `${oldCard.code}-${String(i + 1).padStart(2, '0')}`;
     newCards.push({
       id: cardId,
       participantId: oldCard.participantId,

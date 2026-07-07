@@ -1,6 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
-import { buildSearchIndex, type SearchHit, type SearchHitKind } from '../domain/search.js';
+import {
+  buildSearchIndex,
+  matchCardCodes,
+  type SearchHit,
+  type SearchHitKind,
+} from '../domain/search.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 
 interface Props {
@@ -105,26 +110,45 @@ export function SearchPanel({ onJumpTo }: Props) {
   }, [project]);
 
   const hits = useMemo<SearchHit[]>(() => {
-    if (!index || !query.trim()) return [];
-    const raw = index.search(query.trim());
-    const list: SearchHit[] = raw.slice(0, 60).map((r) => ({
-      id: r.id as string,
-      kind: r.kind as SearchHitKind,
-      refId: r.refId as string,
-      title: r.title as string,
-      bodySnippet: snippet(r.body as string, query.trim()),
-      score: r.score,
-      participantId: (r.participantId as string | null) ?? null,
-      groupId: (r.groupId as string | null) ?? null,
+    if (!index || !project || !query.trim()) return [];
+    const q = query.trim();
+    // カードコード (新旧 ID・ゼロ埋め有無・階層コード) の部分一致を最優先で拾い，
+    // MiniSearch の本文/表札ヒットを後ろに連結する．id で重複排除．
+    const codeHits: SearchHit[] = matchCardCodes(project.data, q).map((h) => ({
+      ...h,
+      bodySnippet: snippet(h.bodySnippet, q),
     }));
-    return list.filter((h) => {
-      if (scopeFilter !== 'all' && h.kind !== scopeFilter) return false;
-      if (selectedParticipantId && h.participantId && h.participantId !== selectedParticipantId) {
-        return false;
-      }
-      return true;
-    });
-  }, [index, query, scopeFilter, selectedParticipantId]);
+    const seen = new Set(codeHits.map((h) => h.id));
+    const list: SearchHit[] = [...codeHits];
+    for (const r of index.search(q)) {
+      const id = r.id as string;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      list.push({
+        id,
+        kind: r.kind as SearchHitKind,
+        refId: r.refId as string,
+        title: r.title as string,
+        bodySnippet: snippet(r.body as string, q),
+        score: r.score,
+        participantId: (r.participantId as string | null) ?? null,
+        groupId: (r.groupId as string | null) ?? null,
+      });
+    }
+    return list
+      .filter((h) => {
+        if (scopeFilter !== 'all' && h.kind !== scopeFilter) return false;
+        if (
+          selectedParticipantId &&
+          h.participantId &&
+          h.participantId !== selectedParticipantId
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .slice(0, 60);
+  }, [index, project, query, scopeFilter, selectedParticipantId]);
 
   if (!project) return null;
 

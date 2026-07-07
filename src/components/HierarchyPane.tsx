@@ -38,7 +38,9 @@ function buildVisibleTree(
     if (!cardsByGroup.has(m.groupId)) cardsByGroup.set(m.groupId, []);
     cardsByGroup.get(m.groupId)!.push(c);
   }
-  for (const [, arr] of cardsByGroup) arr.sort((a, b) => a.serialNumber - b.serialNumber);
+  // code でソートする (分割子カード P02-020-01 は親位置の直後に並ぶ．
+  // serialNumber ソートだと分割子が末尾へ飛ぶ)．LeftPanel と同じ順序規則．
+  for (const [, arr] of cardsByGroup) arr.sort((a, b) => a.code.localeCompare(b.code));
 
   const childGroupsByParent = new Map<string | null, Group[]>();
   for (const g of data.groups) {
@@ -107,6 +109,7 @@ function buildVisibleTree(
 }
 
 const STORAGE_KEY = 'kj.hierarchyCollapsed';
+const WRAP_KEY = 'kj.hierarchyWrap';
 
 export function HierarchyPane({ onClose }: { onClose(): void }) {
   const project = useProjectStore((s) => s.project);
@@ -135,6 +138,24 @@ export function HierarchyPane({ onClose }: { onClose(): void }) {
       // ignore
     }
   }, [collapsed]);
+
+  // ラベル/カード本文を折り返して全文表示するか (既定 = 省略表示)．
+  // このペイン専用の表示設定なので localStorage に保持する．
+  const [wrap, setWrap] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(WRAP_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(WRAP_KEY, wrap ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }, [wrap]);
 
   const visible = useMemo<TreeNode[]>(() => {
     if (!project) return [];
@@ -210,6 +231,18 @@ export function HierarchyPane({ onClose }: { onClose(): void }) {
         >
           全閉
         </button>
+        <button
+          type="button"
+          className={wrap ? 'active' : ''}
+          onClick={() => setWrap((w) => !w)}
+          title={
+            wrap
+              ? '長い表札/本文を省略表示に戻す'
+              : '長い表札/本文を折り返して全文表示する'
+          }
+        >
+          {wrap ? '折り返し: ON' : '折り返し: OFF'}
+        </button>
       </div>
       <div className="hierarchy-pane-toolbar" style={{ borderTop: '1px solid var(--border)' }}>
         <span className="muted small" title="レベルNだけ展開し, それより細かい階層とカードを隠します">
@@ -240,7 +273,7 @@ export function HierarchyPane({ onClose }: { onClose(): void }) {
             (まだグループ・カードがありません)
           </div>
         ) : (
-          <ul className="hierarchy-tree">
+          <ul className={`hierarchy-tree${wrap ? ' wrap' : ''}`}>
             {visible.map((n) => {
               const isCollapsed = collapsed.has(n.id);
               const sel =
@@ -301,7 +334,9 @@ export function HierarchyPane({ onClose }: { onClose(): void }) {
                     <>
                       <span className="hierarchy-code">{n.card?.code}</span>
                       <span className="hierarchy-body muted small">
-                        {n.card?.body.slice(0, 50) || '(本文なし)'}
+                        {wrap
+                          ? n.card?.body || '(本文なし)'
+                          : n.card?.body.slice(0, 50) || '(本文なし)'}
                       </span>
                     </>
                   )}

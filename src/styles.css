@@ -514,6 +514,13 @@ body[data-kj-role="viewer"] .group-label-input {
   font-weight: 600;
 }
 
+/* 2026-07: 保存失敗の可視化 (自動保存は alert を出さないため必須) */
+.save-status.status-error {
+  background: rgba(224, 90, 90, 0.18);
+  color: #e05a5a;
+  font-weight: 600;
+}
+
 /* search panel */
 
 .search-section input[type='text'] {
@@ -2543,6 +2550,22 @@ mark.search-match {
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
+}
+
+/* 折り返し ON: 長い表札/本文を省略せず全文を折り返して表示する．
+   行は複数行になるので上端揃えにする． */
+.hierarchy-tree.wrap .hierarchy-row {
+  align-items: flex-start;
+}
+
+.hierarchy-tree.wrap .hierarchy-label,
+.hierarchy-tree.wrap .hierarchy-body {
+  /* pre-wrap: カード本文内の改行 (複数範囲からの生成カード等) も表示する */
+  white-space: pre-wrap;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* merge buffer (SourceViewer + Canvas) */

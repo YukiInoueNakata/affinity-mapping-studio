@@ -146,7 +146,12 @@ export function App() {
   const openRecent = useCallback(
     async (path: string) => {
       if (isDirty && !confirm('未保存の変更があります。破棄して別のプロジェクトを開きますか？')) return;
-      const r = await projectService.openProjectByPath(path);
+      let r: Awaited<ReturnType<typeof projectService.openProjectByPath>> = null;
+      try {
+        r = await projectService.openProjectByPath(path);
+      } catch {
+        r = null; // 下の else 分岐 (alert + recent から除去) に流す
+      }
       if (r) {
         if (syncManager.isInRoom()) {
           // Connected to an (empty) room: upload rather than just load locally.
@@ -422,7 +427,14 @@ export function App() {
 
   const onOpen = useCallback(async () => {
     if (isDirty && !confirm('未保存の変更があります。破棄して別のプロジェクトを開きますか？')) return;
-    const r = await projectService.openProject();
+    let r: Awaited<ReturnType<typeof projectService.openProject>>;
+    try {
+      r = await projectService.openProject();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      alert(`ファイルを開けませんでした:\n${msg}`);
+      return;
+    }
     if (!r) return;
     if (inRoom) {
       // Connected to an (empty) room: upload the opened project INTO the room
@@ -440,17 +452,95 @@ export function App() {
     loadProject(r.filePath, r.project);
   }, [isDirty, loadProject, inRoom]);
 
+  // 2026-07 レビュー A2/A4: 保存の多重起動ガード + 失敗の可視化．
+  // - isSavingRef: 手動保存 (Ctrl+S 連打) と自動保存の同時実行を防ぐ
+  //   (Rust 側の WRITE_LOCK と二重の防御)
+  // - saveError: 直近の保存失敗をステータスバーに表示 (自動保存は alert を
+  //   出さないため，これが無いと失敗が完全に不可視だった)
+  const isSavingRef = useRef(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  /** 保存本体．silent=true (自動保存) は alert を出さず saveError 表示のみ．
+   *  戻り値 = 実際に保存できたか． */
+  const doSave = useCallback(
+    async (silent: boolean): Promise<boolean> => {
+      if (!project) return false;
+      if (isSavingRef.current) return false; // 保存中 — 多重起動しない
+      isSavingRef.current = true;
+      try {
+        const r = await projectService.saveProject(filePath, project);
+        if (r) {
+          markSaved(r.filePath, r.updatedAt);
+          setSaveError(null);
+          return true;
+        }
+        return false; // 保存ダイアログでキャンセル
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('[save] failed:', e);
+        setSaveError(msg);
+        if (!silent) alert(`保存に失敗しました:\n${msg}`);
+        return false;
+      } finally {
+        isSavingRef.current = false;
+      }
+    },
+    [project, filePath, markSaved]
+  );
+
   const onSave = useCallback(async () => {
-    if (!project) return;
-    const r = await projectService.saveProject(filePath, project);
-    if (r) markSaved(r.filePath, r.updatedAt);
-  }, [project, filePath, markSaved]);
+    await doSave(false);
+  }, [doSave]);
 
   const onSaveAs = useCallback(async () => {
     if (!project) return;
-    const r = await projectService.saveProjectAs(project);
-    if (r) markSaved(r.filePath, r.updatedAt);
+    if (isSavingRef.current) return;
+    isSavingRef.current = true;
+    try {
+      const r = await projectService.saveProjectAs(project);
+      if (r) {
+        markSaved(r.filePath, r.updatedAt);
+        setSaveError(null);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[saveAs] failed:', e);
+      setSaveError(msg);
+      alert(`保存に失敗しました:\n${msg}`);
+    } finally {
+      isSavingRef.current = false;
+    }
   }, [project, markSaved]);
+
+  // 2026-07 レビュー A4: ウィンドウを閉じるときの未保存ガード (Alt+F4 /
+  // タスクバー閉じる)．新規/開く/接続の confirm と同じ運用を終了時にも適用する．
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    void (async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const un = await getCurrentWindow().onCloseRequested((event) => {
+          const dirty = useProjectStore.getState().isDirty;
+          if (
+            dirty &&
+            !confirm('未保存の変更があります。保存せずに終了しますか？')
+          ) {
+            event.preventDefault();
+          }
+        });
+        if (disposed) un();
+        else unlisten = un;
+      } catch (e) {
+        console.warn('[close-guard] register failed:', e);
+      }
+    })();
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   useEffect(() => {
     const ev = (window as unknown as {
@@ -680,6 +770,8 @@ export function App() {
 
   const selectedCardIds = useProjectStore((s) => s.selectedCardIds);
   const selectedGroupIds = useProjectStore((s) => s.selectedGroupIds);
+  const selectedRelationId = useProjectStore((s) => s.selectedRelationId);
+  const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
 
   /**
    * Collect AlignNodeInput list for the current selection. Returns a tagged
@@ -1022,9 +1114,13 @@ export function App() {
       setAutosaveCountdown((prev) => {
         if (prev <= 1) {
           void (async () => {
-            await onSave();
-            setAutosaveFlash(true);
-            setTimeout(() => setAutosaveFlash(false), 1500);
+            // 2026-07 レビュー A4: flash (「自動保存しました」) は実際に保存
+            // できたときだけ点灯する．旧実装は失敗しても成功と同じ表示だった．
+            const ok = await doSave(true);
+            if (ok) {
+              setAutosaveFlash(true);
+              setTimeout(() => setAutosaveFlash(false), 1500);
+            }
           })();
           return 60;
         }
@@ -1035,7 +1131,7 @@ export function App() {
       if (autosaveRef.current) clearInterval(autosaveRef.current);
       autosaveRef.current = null;
     };
-  }, [project, filePath, onSave, autosaveEnabled]);
+  }, [project, filePath, doSave, autosaveEnabled]);
 
   // Reset countdown whenever the project becomes clean (e.g., manual save)
   useEffect(() => {
@@ -1044,25 +1140,29 @@ export function App() {
 
   const saveStatus = !project
     ? ''
-    : !filePath
-      ? '未保存 — 「保存」で .kjproj として保存'
-      : autosaveFlash
-        ? `自動保存しました ${project.metadata.updated_at.slice(11, 19)}`
-        : isDirty
-          ? autosaveEnabled
-            ? `未保存 — 自動保存まで ${autosaveCountdown} 秒`
-            : '未保存 (自動保存 OFF)'
-          : `保存済み ${project.metadata.updated_at.slice(11, 19)}`;
+    : saveError
+      ? `保存失敗 — ${saveError}`
+      : !filePath
+        ? '未保存 — 「保存」で .kjproj として保存'
+        : autosaveFlash
+          ? `自動保存しました ${project.metadata.updated_at.slice(11, 19)}`
+          : isDirty
+            ? autosaveEnabled
+              ? `未保存 — 自動保存まで ${autosaveCountdown} 秒`
+              : '未保存 (自動保存 OFF)'
+            : `保存済み ${project.metadata.updated_at.slice(11, 19)}`;
 
   const saveStatusClass = !project
     ? ''
-    : !filePath
-      ? 'status-new'
-      : autosaveFlash
-        ? 'status-flash'
-        : isDirty
-          ? 'status-dirty'
-          : 'status-saved';
+    : saveError
+      ? 'status-error'
+      : !filePath
+        ? 'status-new'
+        : autosaveFlash
+          ? 'status-flash'
+          : isDirty
+            ? 'status-dirty'
+            : 'status-saved';
 
   const title = project
     ? `${project.metadata.name}${isDirty ? ' *' : ''} — Affinity Mapping Studio`
@@ -1444,6 +1544,26 @@ export function App() {
                 >
                   <span className="rb-glyph">□</span>
                   <span>範囲</span>
+                </button>
+                <button
+                  type="button"
+                  className="rb-btn-lg"
+                  onClick={() => {
+                    selectCard(null);
+                    selectGroup(null);
+                    selectSegment(null);
+                    selectRelation(null);
+                  }}
+                  disabled={
+                    selectedCardIds.length === 0 &&
+                    selectedGroupIds.length === 0 &&
+                    !selectedRelationId &&
+                    !selectedSegmentId
+                  }
+                  title="すべての選択を解除する (Esc でも可)"
+                >
+                  <span className="rb-glyph">⊘</span>
+                  <span>選択解除</span>
                 </button>
               </RibbonSection>
               <RibbonSection label="タグ">

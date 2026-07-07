@@ -466,6 +466,7 @@ function CanvasViewImpl() {
             maxChars: settings?.cardMaxChars,
             collapsed,
             mergedFrom: c.mergedFrom,
+            mergedFromCodes: c.mergedFromCodes,
           },
           selected: isSelected,
           zIndex: 10 + (storedPos?.z ?? 0),
@@ -1441,7 +1442,7 @@ function CanvasViewImpl() {
     }
     const codes = oldCards
       .slice()
-      .sort((a, b) => a.serialNumber - b.serialNumber)
+      .sort((a, b) => a.code.localeCompare(b.code))
       .map((c) => c.code)
       .join(', ');
     if (!confirm(`${oldCards.length} 枚のカード (${codes}) を 1 枚に結合しますか？\n(Undo で復元できます)`)) {

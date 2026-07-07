@@ -6,7 +6,7 @@
 // kj-trace-studio runs unchanged.
 
 import { type ProjectFile, type Snapshot } from '@shared/types/project.js';
-import { makeEmptyProject } from '@shared/types/project.js';
+import { backfillProjectData, makeEmptyProject } from '@shared/types/project.js';
 import type {
   IpcApi,
   OpenProjectResult,
@@ -104,7 +104,8 @@ function payloadToProject(payload: ProjectPayload): ProjectFile {
   }
   return {
     ...meta,
-    data: payload.data as unknown as ProjectFile['data'],
+    // 旧スキーマ (.kjproj に後発テーブルの JSON が無い) は空配列で補完する．
+    data: backfillProjectData(payload.data as Partial<ProjectFile['data']>),
     ...(snapshots.length > 0 ? { snapshots } : {}),
   };
 }
@@ -139,12 +140,15 @@ const api: IpcApi = {
   },
 
   openProjectByPath: async (filePath: string): Promise<OpenProjectResult | null> => {
+    // 2026-07 レビュー A4: 旧実装は読込エラーを null に潰していたため，
+    // 壊れた/ロック中のファイルを開いても UI が沈黙していた．throw して
+    // 呼び出し側 (App.tsx) で alert する．
     try {
       const payload = await invoke<ProjectPayload>('read_kjproj', { path: filePath });
       return { filePath, project: payloadToProject(payload) };
     } catch (err) {
       console.error('[openProjectByPath]', err);
-      return null;
+      throw err instanceof Error ? err : new Error(String(err));
     }
   },
 

@@ -26,8 +26,22 @@ use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+/// 保存の直列化ロック (2026-07 レビュー Critical A2)．
+/// 手動保存 (Ctrl+S 連打) と自動保存が同時に走ると，同一 tmp への二重書込みで
+/// 壊れた ZIP が本体へ rename され得る．Tauri は sync コマンドを blocking pool の
+/// 別スレッドで並行実行するため，プロセス内 Mutex で write_kjproj を直列化する．
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+/// tmp ファイル名の一意化カウンタ (直列化に加えた防御第 2 層)．
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// ZIP エントリ 1 件あたりの展開サイズ上限 (zip-bomb / 破損ファイル対策)．
+const MAX_ZIP_ENTRY_BYTES: u64 = 200 * 1024 * 1024; // 200 MB
 
 #[derive(Serialize, Deserialize)]
 pub struct ProjectPayload {
@@ -61,8 +75,19 @@ pub fn read_kjproj(path: &str) -> Result<ProjectPayload, String> {
         if name.ends_with('/') {
             continue;
         }
+        // zip-bomb / 破損対策: 宣言された展開サイズが上限を超えるエントリは
+        // 読み込まずに明示エラーにする (無制限の read_to_string で OOM しない)．
+        if entry.size() > MAX_ZIP_ENTRY_BYTES {
+            return Err(format!(
+                "zip entry {name} is too large ({} bytes > {} bytes limit)",
+                entry.size(),
+                MAX_ZIP_ENTRY_BYTES
+            ));
+        }
         let mut buf = String::new();
         entry
+            .by_ref()
+            .take(MAX_ZIP_ENTRY_BYTES)
             .read_to_string(&mut buf)
             .map_err(|e| format!("read {name}: {e}"))?;
 
@@ -96,6 +121,11 @@ pub fn read_kjproj(path: &str) -> Result<ProjectPayload, String> {
 }
 
 pub fn write_kjproj(path: &str, payload: &ProjectPayload) -> Result<(), String> {
+    // 保存全体を直列化 (自動保存と手動保存の同時実行による ZIP 破損防止)．
+    // Mutex poisoning (前の保存スレッドが panic) は into_inner 相当で握り潰さず，
+    // ロック自体は継続利用できるようにする．
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
     let target = Path::new(path);
     let parent = target
         .parent()
@@ -110,7 +140,13 @@ pub fn write_kjproj(path: &str, payload: &ProjectPayload) -> Result<(), String> 
         .unwrap_or("kjproj");
 
     // 1) write to tmp file in same directory (so rename is atomic on the same fs)
-    let tmp = parent.join(format!(".{stem}.tmp"));
+    //    tmp 名は pid + カウンタで一意化 (多重プロセス / 万一の並行書込みでも
+    //    互いの tmp を truncate しない — 防御第 2 層)．
+    let tmp = parent.join(format!(
+        ".{stem}.{}-{}.tmp",
+        std::process::id(),
+        TMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
     {
         let file = File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
         let mut zip = ZipWriter::new(file);
@@ -147,17 +183,86 @@ pub fn write_kjproj(path: &str, payload: &ProjectPayload) -> Result<(), String> 
         finished.sync_all().map_err(|e| format!("fsync: {e}"))?;
     }
 
-    // 2) rotate existing backups + move current to .bak.1 + daily snapshot
-    if target.exists() {
+    // 2) rotate existing backups + move current to .bak.1
+    //
+    // 2026-07 レビュー Critical A3: 「target を .bak.1 へ退避」から「tmp を
+    // target へ rename」までの間に失敗し得る処理を挟まない．旧実装はこの間に
+    // daily バックアップ作成 (fs::copy — ディスクフルで失敗しやすい) を置いて
+    // いたため，失敗するとプロジェクトファイルが定位置から消えたまま Err を
+    // 返していた．daily 処理は本体 rename 完了後の best-effort に移す．
+    let had_existing = target.exists();
+    if had_existing {
         rotate_bak_files(parent, stem, ext)?;
         let bak1 = backup_path(parent, stem, ext, 1);
         fs::rename(target, &bak1).map_err(|e| format!("rename current -> .bak.1: {e}"))?;
-        write_daily_backup(&bak1, parent, stem, ext)?;
-        prune_daily_backups(parent, stem, ext, 7)?;
     }
 
     // 3) rename tmp -> target (atomic on the same filesystem)
-    fs::rename(&tmp, target).map_err(|e| format!("rename tmp -> target: {e}"))?;
+    if let Err(e) = fs::rename(&tmp, target) {
+        // 失敗時は退避した .bak.1 を定位置へ戻して原状復帰を試みる
+        // (戻せなくてもデータは .bak.1 と tmp に残る)．
+        if had_existing {
+            let bak1 = backup_path(parent, stem, ext, 1);
+            let _ = fs::rename(&bak1, target);
+        }
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("rename tmp -> target: {e}"));
+    }
+
+    // 4) daily バックアップ + 世代整理は本体保存の完了後に best-effort で行う．
+    //    (失敗しても保存自体は成功しているので警告ログのみ)
+    if had_existing {
+        let bak1 = backup_path(parent, stem, ext, 1);
+        if let Err(e) = write_daily_backup(&bak1, parent, stem, ext) {
+            eprintln!("[project_io] daily backup failed (non-fatal): {e}");
+        }
+        if let Err(e) = prune_daily_backups(parent, stem, ext, 7) {
+            eprintln!("[project_io] daily prune failed (non-fatal): {e}");
+        }
+    }
+    Ok(())
+}
+
+/// 任意バイト列の atomic 書込み (tmp → fsync → rename)．
+/// Word エクスポート等，renderer が生成したバイナリの保存に使う
+/// (2026-07 レビュー W5: 旧 write_bytes は直接書込みで，クラッシュ時に
+/// 途中までの壊れたファイルが残った)．
+pub fn write_bytes_atomic(path: &str, contents: &[u8]) -> Result<(), String> {
+    let target = Path::new(path);
+    let parent = target
+        .parent()
+        .ok_or_else(|| format!("invalid path: {path}"))?;
+    let stem = target
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("out");
+    let tmp = parent.join(format!(
+        ".{stem}.{}-{}.tmp",
+        std::process::id(),
+        TMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    {
+        let mut f = File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
+        f.write_all(contents).map_err(|e| format!("write: {e}"))?;
+        f.sync_all().map_err(|e| format!("fsync: {e}"))?;
+    }
+    // Windows では既存ファイルへの rename が失敗するため，先に退避する．
+    let bak = parent.join(format!(".{stem}.replaced.bak"));
+    let had_existing = target.exists();
+    if had_existing {
+        let _ = fs::remove_file(&bak);
+        fs::rename(target, &bak).map_err(|e| format!("rename current -> bak: {e}"))?;
+    }
+    if let Err(e) = fs::rename(&tmp, target) {
+        if had_existing {
+            let _ = fs::rename(&bak, target);
+        }
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("rename tmp -> target: {e}"));
+    }
+    if had_existing {
+        let _ = fs::remove_file(&bak);
+    }
     Ok(())
 }
 

@@ -72,13 +72,23 @@ pub fn analyze_docx(path: &str) -> Result<DocxAnalysis, String> {
     Ok(DocxAnalysis { text, comments })
 }
 
+// zip-bomb / 破損 .docx 対策の展開サイズ上限 (project_io と同方針)．
+const MAX_DOCX_ENTRY_BYTES: u64 = 200 * 1024 * 1024; // 200 MB
+
 fn read_zip_entry(
     archive: &mut ZipArchive<Cursor<Vec<u8>>>,
     name: &str,
 ) -> Option<String> {
     let mut entry = archive.by_name(name).ok()?;
+    if entry.size() > MAX_DOCX_ENTRY_BYTES {
+        return None;
+    }
     let mut buf = String::new();
-    entry.read_to_string(&mut buf).ok()?;
+    entry
+        .by_ref()
+        .take(MAX_DOCX_ENTRY_BYTES)
+        .read_to_string(&mut buf)
+        .ok()?;
     Some(buf)
 }
 

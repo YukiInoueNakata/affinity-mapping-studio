@@ -3,12 +3,11 @@
 // Modules:
 //   - docx          : analyze_docx (mammoth + extractCommentRanges replacement)
 //   - sheet         : parse_csv / parse_xlsx (sheetjs replacement)
-//   - docx_writer   : Word export probe (full export comes in 5c)
 //   - project_io    : .kjproj ZIP read/write + atomic write + multi-gen backups
 //   - file_dialog   : open/save dialog wrappers over tauri-plugin-dialog
+// (docx_writer は 5c で JS docx 生成 + write_bytes 方式を採用したため退役)
 
 mod docx;
-mod docx_writer;
 mod file_dialog;
 mod project_io;
 mod sheet;
@@ -45,16 +44,6 @@ fn parse_xlsx(path: String) -> Result<SheetData, String> {
 }
 
 #[tauri::command]
-fn export_docx_sample(
-    title: String,
-    body_lines: Vec<String>,
-    out_path: String,
-) -> Result<(), String> {
-    let refs: Vec<&str> = body_lines.iter().map(String::as_str).collect();
-    docx_writer::build_sample_docx(&title, &refs, &out_path)
-}
-
-#[tauri::command]
 fn read_text_file(path: String) -> Result<String, String> {
     text_io::read_text_file(&path)
 }
@@ -72,9 +61,11 @@ fn write_kjproj(path: String, payload: ProjectPayload) -> Result<(), String> {
 // Write raw bytes to a path (e.g. a Word .docx generated in the renderer by the
 // `docx` JS library — the renderer can't touch the filesystem directly).
 // async so it runs off the main thread for larger payloads.
+// 2026-07 レビュー W5: tmp → fsync → rename の atomic 書込みに変更
+// (クラッシュ時に途中までの壊れたファイルを残さない)．
 #[tauri::command]
 async fn write_bytes(path: String, contents: Vec<u8>) -> Result<(), String> {
-    std::fs::write(&path, &contents).map_err(|e| format!("write error: {e}"))
+    project_io::write_bytes_atomic(&path, &contents)
 }
 
 // async so Tauri runs these off the main thread — see file_dialog.rs for why
@@ -107,7 +98,6 @@ pub fn run() {
             analyze_docx,
             parse_csv,
             parse_xlsx,
-            export_docx_sample,
             read_text_file,
             read_kjproj,
             write_kjproj,

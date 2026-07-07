@@ -214,21 +214,33 @@ export function makeCreateMGtaCategoryCommand(category: MGtaCategory): DomainCom
 }
 
 export function makeDeleteMGtaCategoryCommand(category: MGtaCategory): DomainCommand {
+  // apply 時に categoryId を外した概念の id を closure に控え，revert で復元する
+  // (2026-07 レビュー: 旧実装は Undo 後も概念が未分類のまま残っていた)．
+  let clearedConceptIds: string[] = [];
   return {
     label: `カテゴリー削除: ${category.name}`,
-    apply: (d) => ({
-      ...d,
-      m_gta_categories: d.m_gta_categories.filter((c) => c.id !== category.id),
-      m_gta_concepts: d.m_gta_concepts.map((c) =>
-        c.categoryId === category.id ? { ...c, categoryId: undefined } : c
-      ),
-    }),
-    revert: (d) => ({
-      ...d,
-      m_gta_categories: [...d.m_gta_categories, category],
-      // Note: concepts whose categoryId was cleared cannot be revived here cleanly;
-      // we accept that they remain uncategorised on revert.
-    }),
+    apply: (d) => {
+      clearedConceptIds = d.m_gta_concepts
+        .filter((c) => c.categoryId === category.id)
+        .map((c) => c.id);
+      return {
+        ...d,
+        m_gta_categories: d.m_gta_categories.filter((c) => c.id !== category.id),
+        m_gta_concepts: d.m_gta_concepts.map((c) =>
+          c.categoryId === category.id ? { ...c, categoryId: undefined } : c
+        ),
+      };
+    },
+    revert: (d) => {
+      const ids = new Set(clearedConceptIds);
+      return {
+        ...d,
+        m_gta_categories: [...d.m_gta_categories, category],
+        m_gta_concepts: d.m_gta_concepts.map((c) =>
+          ids.has(c.id) ? { ...c, categoryId: category.id } : c
+        ),
+      };
+    },
   };
 }
 
@@ -428,19 +440,33 @@ export function makeCreateGtaCategoryCommand(category: GtaCategory): DomainComma
 }
 
 export function makeDeleteGtaCategoryCommand(category: GtaCategory): DomainCommand {
+  // apply 時に categoryId を外したコードの id を closure に控え，revert で復元する
+  // (M-GTA 側と同じ 2026-07 レビュー修正)．
+  let clearedCodeIds: string[] = [];
   return {
     label: `GTA カテゴリー削除: ${category.name}`,
-    apply: (d) => ({
-      ...d,
-      gta_categories: d.gta_categories.filter((c) => c.id !== category.id),
-      gta_codes: d.gta_codes.map((c) =>
-        c.categoryId === category.id ? { ...c, categoryId: undefined } : c
-      ),
-    }),
-    revert: (d) => ({
-      ...d,
-      gta_categories: [...d.gta_categories, category],
-    }),
+    apply: (d) => {
+      clearedCodeIds = d.gta_codes
+        .filter((c) => c.categoryId === category.id)
+        .map((c) => c.id);
+      return {
+        ...d,
+        gta_categories: d.gta_categories.filter((c) => c.id !== category.id),
+        gta_codes: d.gta_codes.map((c) =>
+          c.categoryId === category.id ? { ...c, categoryId: undefined } : c
+        ),
+      };
+    },
+    revert: (d) => {
+      const ids = new Set(clearedCodeIds);
+      return {
+        ...d,
+        gta_categories: [...d.gta_categories, category],
+        gta_codes: d.gta_codes.map((c) =>
+          ids.has(c.id) ? { ...c, categoryId: category.id } : c
+        ),
+      };
+    },
   };
 }
 
@@ -637,25 +663,48 @@ export function makeMergeParticipantsCommand(
       const toP = d.participants.find((p) => p.id === toId);
       if (!fromP || !toP) return d;
 
-      // to の cards で最大の serial を取得
-      const codeToSerial = (code: string): number => {
-        const m = code.match(/-(\d+)$/);
-        return m ? parseInt(m[1], 10) : 0;
+      // 2026-07 レビュー修正: 旧実装は code 末尾を正規表現でパースして採番して
+      // いたため，(1) serialNumber を更新せず後続の nextCardSerial() と code が
+      // 衝突する，(2) 分割階層コード (P02-020-01) の末尾 01 を serial と誤認する，
+      // の 2 点で code 一意性の不変条件を壊していた．正本は常に serialNumber．
+      //
+      // 新方式:
+      //   - 開始点 S = to 側の max(serialNumber, code の基底番号) — code 衝突も
+      //     serial 衝突も両方避ける
+      //   - from 側の「基底番号」(code の 2 セグメント目) を昇順で S+1.. に再割当し，
+      //     分割階層の suffix (-01 など) は保持する (P13-020-01 → P12-021-01)
+      //   - serialNumber は基底の後ろから全カードに一意採番
+      const numSeg = (code: string, idx: number): number => {
+        const seg = code.split('-')[idx];
+        return seg && /^\d+$/.test(seg) ? parseInt(seg, 10) : 0;
       };
-      const toCardsMaxSerial = d.cards
-        .filter((c) => c.participantId === toId)
-        .map((c) => codeToSerial(c.code))
-        .reduce((a, b) => Math.max(a, b), 0);
+      const toCards = d.cards.filter((c) => c.participantId === toId);
+      const start = Math.max(
+        toCards.reduce((a, c) => Math.max(a, c.serialNumber), 0),
+        toCards.reduce((a, c) => Math.max(a, numSeg(c.code, 1)), 0)
+      );
 
-      // from の cards を serial 昇順でソート + 新コード割当
-      const fromCardsSorted = d.cards
+      const fromCards = d.cards
         .filter((c) => c.participantId === fromId)
-        .sort((a, b) => codeToSerial(a.code) - codeToSerial(b.code));
+        .sort((a, b) => a.serialNumber - b.serialNumber);
+      // 基底番号 (code 2 セグメント目) → 新基底番号
+      const bases = Array.from(new Set(fromCards.map((c) => numSeg(c.code, 1)))).sort(
+        (a, b) => a - b
+      );
+      const baseMap = new Map<number, number>();
+      bases.forEach((b, i) => baseMap.set(b, start + i + 1));
+
       const newCodeMap = new Map<string, string>();
-      fromCardsSorted.forEach((c, i) => {
-        const newSerial = toCardsMaxSerial + i + 1;
-        const newCode = `${toP.code}-${String(newSerial).padStart(3, '0')}`;
-        newCodeMap.set(c.id, newCode);
+      const newSerialMap = new Map<string, number>();
+      fromCards.forEach((c, i) => {
+        const segs = c.code.split('-');
+        const newBase = baseMap.get(numSeg(c.code, 1)) ?? start + bases.length + i + 1;
+        const suffix = segs.slice(2); // 分割階層の -01-02… を保持
+        newCodeMap.set(
+          c.id,
+          [`${toP.code}`, String(newBase).padStart(3, '0'), ...suffix].join('-')
+        );
+        newSerialMap.set(c.id, start + bases.length + i + 1);
       });
 
       return {
@@ -667,6 +716,7 @@ export function makeMergeParticipantsCommand(
                 ...c,
                 participantId: toId,
                 code: newCodeMap.get(c.id) ?? c.code,
+                serialNumber: newSerialMap.get(c.id) ?? c.serialNumber,
               }
             : c
         ),
@@ -675,12 +725,43 @@ export function makeMergeParticipantsCommand(
         ),
       };
     },
-    revert: (d) => ({
-      ...d,
-      participants: prevSnapshot.participants,
-      cards: prevSnapshot.cards,
-      source_segments: prevSnapshot.source_segments,
-    }),
+    // 2026-07 レビュー修正: 旧実装は 3 テーブルを snapshot で丸ごと差し戻して
+    // いたため，マージ後に他クライアントが行った並行編集 (sync) を Undo が
+    // 無差別に消していた．id 単位で「このコマンドが変えたものだけ」を戻す．
+    revert: (d) => {
+      const prevCardById = new Map(
+        prevSnapshot.cards
+          .filter((c) => c.participantId === fromId)
+          .map((c) => [c.id, c] as const)
+      );
+      const prevSegIds = new Set(
+        prevSnapshot.source_segments
+          .filter((s) => s.participantId === fromId)
+          .map((s) => s.id)
+      );
+      const fromP = prevSnapshot.participants.find((p) => p.id === fromId);
+      const hasFrom = d.participants.some((p) => p.id === fromId);
+      return {
+        ...d,
+        participants:
+          fromP && !hasFrom ? [...d.participants, fromP] : d.participants,
+        cards: d.cards.map((c) => {
+          const prev = prevCardById.get(c.id);
+          // マージで書き換えたフィールドのみ復元 (本文等のその後の編集は保持)
+          return prev
+            ? {
+                ...c,
+                participantId: prev.participantId,
+                code: prev.code,
+                serialNumber: prev.serialNumber,
+              }
+            : c;
+        }),
+        source_segments: d.source_segments.map((s) =>
+          prevSegIds.has(s.id) ? { ...s, participantId: fromId } : s
+        ),
+      };
+    },
   };
 }
 
@@ -1806,22 +1887,49 @@ export function makeNestIntoExistingGroupCommand(
   const targetIds = new Set(childGroupIds);
   const nextById = new Map(groupBoundsUpdates.map((u) => [u.next.groupId, u.next]));
   const prevById = new Map(groupBoundsUpdates.map((u) => [u.prev.groupId, u.prev]));
+  // 2026-07 レビュー: revert 用に apply 時点の updatedAt を控える (他の group
+  // コマンドと同じ prevUpdatedAt 復元パターン)．
+  const prevUpdatedAtByChild = new Map<string, string>();
   return {
     label: `既存上位グループへネスト: ${parentGroupId} (+${childGroupIds.length})`,
-    apply: (d) => ({
-      ...d,
-      groups: d.groups.map((g) =>
-        targetIds.has(g.id) ? { ...g, parentGroupId, updatedAt: now } : g
-      ),
-      group_positions: d.group_positions.map((p) =>
-        nextById.has(p.groupId) ? nextById.get(p.groupId)! : p
-      ),
-    }),
+    apply: (d) => {
+      // 循環ガード (2026-07 レビュー Info): parent の祖先チェーンに child が
+      // 含まれていたら，この nest は parentGroupId ループを作るので中止する．
+      const byId = new Map(d.groups.map((g) => [g.id, g] as const));
+      let anc = byId.get(parentGroupId)?.parentGroupId ?? null;
+      let hops = 0;
+      while (anc && hops < 1000) {
+        if (targetIds.has(anc)) {
+          console.warn(
+            `[commands] nestIntoExistingGroup: 循環を検出したため中止 (parent=${parentGroupId})`
+          );
+          return d;
+        }
+        anc = byId.get(anc)?.parentGroupId ?? null;
+        hops++;
+      }
+      for (const g of d.groups) {
+        if (targetIds.has(g.id)) prevUpdatedAtByChild.set(g.id, g.updatedAt);
+      }
+      return {
+        ...d,
+        groups: d.groups.map((g) =>
+          targetIds.has(g.id) ? { ...g, parentGroupId, updatedAt: now } : g
+        ),
+        group_positions: d.group_positions.map((p) =>
+          nextById.has(p.groupId) ? nextById.get(p.groupId)! : p
+        ),
+      };
+    },
     revert: (d) => ({
       ...d,
       groups: d.groups.map((g) =>
         targetIds.has(g.id)
-          ? { ...g, parentGroupId: prevParentByChild[g.id] ?? null, updatedAt: now }
+          ? {
+              ...g,
+              parentGroupId: prevParentByChild[g.id] ?? null,
+              updatedAt: prevUpdatedAtByChild.get(g.id) ?? g.updatedAt,
+            }
           : g
       ),
       group_positions: d.group_positions.map((p) =>

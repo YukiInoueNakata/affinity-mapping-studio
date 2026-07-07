@@ -37,6 +37,47 @@ export const INITIAL_ANALYSIS_METHODS = [
   { kind: 'gta' as const, name: 'GTA' },
 ];
 
+/** ProjectData の全配列テーブル名．旧スキーマの .kjproj には後発テーブルの
+ * JSON が存在しないため，読込時に backfillProjectData で [] を補う． */
+const ALL_TABLE_NAMES = [
+  'participants',
+  'source_segments',
+  'cards',
+  'card_source_links',
+  'card_positions',
+  'groups',
+  'group_memberships',
+  'labels',
+  'group_positions',
+  'text_revisions',
+  'analysis_methods',
+  'analysis_sessions',
+  'analytic_object_links',
+  'm_gta_settings',
+  'm_gta_concepts',
+  'm_gta_variations',
+  'm_gta_categories',
+  'theoretical_memos',
+  'diagram_relations',
+  'gta_codes',
+  'gta_code_applications',
+  'gta_categories',
+] as const;
+
+/** 旧バージョンで保存されたプロジェクト (後発テーブルのファイルが無い) を
+ * 現行スキーマに正規化する．欠損テーブルは空配列で補い，既存データと
+ * final_diagram 等の非テーブルフィールドはそのまま保持する．
+ * (2026-07 レビュー: 欠損配列への無防備アクセスで白画面クラッシュする
+ * バグの恒久対策．読込・スナップショット復元・sync hydrate で通すこと) */
+export function backfillProjectData(data: Partial<ProjectData> | undefined | null): ProjectData {
+  const src = (data ?? {}) as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...src };
+  for (const t of ALL_TABLE_NAMES) {
+    if (!Array.isArray(out[t])) out[t] = [];
+  }
+  return out as unknown as ProjectData;
+}
+
 export function makeEmptyProject(name: string, projectId: string, now: string): ProjectFile {
   return {
     schema_version: CURRENT_SCHEMA_VERSION,

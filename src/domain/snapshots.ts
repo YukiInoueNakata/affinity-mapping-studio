@@ -57,6 +57,46 @@ function indexById<T extends { id: string }>(arr: T[]): Map<string, T> {
   return new Map(arr.map((x) => [x.id, x]));
 }
 
+/** 順序を無視しない stable な JSON 比較 (undefined フィールドは落とす)．
+ *  Diff 検出用途なので参照同一性より内容一致を優先する． */
+function jsonEq(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/** カードの「変更」判定 (2026-07 レビュー W5: 旧実装は body / code のみ比較で，
+ *  メモ・タグ・placement・スタイル等の変更が Diff に一切出なかった —
+ *  監査証跡機能として過少報告)． */
+function cardChanged(b: Card, a: Card): boolean {
+  return (
+    a.body !== b.body ||
+    a.code !== b.code ||
+    a.status !== b.status ||
+    (a.placement ?? 'canvas') !== (b.placement ?? 'canvas') ||
+    a.collapsed !== b.collapsed ||
+    !jsonEq(a.tags, b.tags) ||
+    !jsonEq(a.memoLog, b.memoLog) ||
+    !jsonEq(a.displayStyle, b.displayStyle) ||
+    !jsonEq(a.mergedFrom, b.mergedFrom) ||
+    !jsonEq(a.mergedFromCodes, b.mergedFromCodes)
+  );
+}
+
+/** グループの「変更」判定 (narrative / displayStyle も対象に)． */
+function groupChanged(b: Group, a: Group): boolean {
+  return (
+    a.name !== b.name ||
+    a.parentGroupId !== b.parentGroupId ||
+    a.collapsed !== b.collapsed ||
+    a.level !== b.level ||
+    (a.narrative ?? '') !== (b.narrative ?? '') ||
+    !jsonEq(
+      (a as unknown as { displayStyle?: unknown }).displayStyle,
+      (b as unknown as { displayStyle?: unknown }).displayStyle
+    )
+  );
+}
+
 export function diffSnapshots(before: ProjectData, after: ProjectData): SnapshotDiffSummary {
   const beforeCards = indexById(before.cards);
   const afterCards = indexById(after.cards);
@@ -71,7 +111,7 @@ export function diffSnapshots(before: ProjectData, after: ProjectData): Snapshot
   for (const [id, c] of afterCards) {
     const b = beforeCards.get(id);
     if (!b) addedCards.push(c);
-    else if (c.body !== b.body || c.code !== b.code) changedCards.push({ before: b, after: c });
+    else if (cardChanged(b, c)) changedCards.push({ before: b, after: c });
   }
   for (const [id, c] of beforeCards) {
     if (!afterCards.has(id)) removedCards.push(c);
@@ -83,7 +123,7 @@ export function diffSnapshots(before: ProjectData, after: ProjectData): Snapshot
   for (const [id, g] of afterGroups) {
     const b = beforeGroups.get(id);
     if (!b) addedGroups.push(g);
-    else if (g.name !== b.name || g.parentGroupId !== b.parentGroupId || g.collapsed !== b.collapsed) {
+    else if (groupChanged(b, g)) {
       changedGroups.push({ before: b, after: g });
     }
   }

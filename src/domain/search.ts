@@ -50,8 +50,12 @@ export function buildSearchDocs(data: ProjectData): SearchDoc[] {
     // 2026-06-02: 統合元カード (mergedFrom) の旧 code も body に含めて検索可能に．
     // title は表示用なので c.code のまま．body に旧コードを混ぜることで
     // 「統合前の P02-003」検索で統合後のカードもヒットする．
+    // 0.2.28+: 分割由来の階層コードは serial から再現できないため，code を
+    // そのまま保存した mergedFromCodes を優先する (旧データは serial から復元)．
     let mergedCodes = '';
-    if (c.mergedFrom && c.mergedFrom.length > 0) {
+    if (c.mergedFromCodes && c.mergedFromCodes.length > 0) {
+      mergedCodes = c.mergedFromCodes.join(' ');
+    } else if (c.mergedFrom && c.mergedFrom.length > 0) {
       const partCode = participantCodeById.get(c.participantId);
       if (partCode) {
         mergedCodes = c.mergedFrom
@@ -168,46 +172,66 @@ export function buildSearchIndex(data: ProjectData) {
   return ms;
 }
 
-/** カード番号らしい文字列を code 比較用に正規化する．前置の英字接頭 (P など) と
- * 記号・空白を除き，数字ブロックのゼロ埋めを外す (024 → 24)．一致比較専用． */
-function normalizeCodeQuery(s: string): string {
-  return s
+/** カードコードを「ゼロ埋めの有無を無視した」比較用の文字列にする．
+ * 参加者接頭 (P02 など) は英数字混在なので保持し，ハイフン区切りの純数字
+ * セグメント (020 / 01) だけ先頭ゼロを外す．
+ *   P02-020-01 → p02-20-1 ／ 024 → 24 ／ 02-024 → 2-24 */
+export function looseCardCode(code: string): string {
+  return code
     .toLowerCase()
-    .replace(/[^0-9a-z]/g, '')
-    .replace(/^[a-z]+/, '')
-    .replace(/\b0+(\d)/g, '$1');
+    .split('-')
+    .map((seg) => (/^\d+$/.test(seg) ? seg.replace(/^0+(\d)/, '$1') : seg))
+    .join('-');
 }
 
-/** クエリがカード番号らしい (数字を含み英字が participant 接頭のみ) ときだけ，
- * code の完全一致/包含でカードを拾う．そうでなければ空配列． */
-function searchCardCodesExact(
-  data: ProjectData,
-  query: string,
-  filters: SearchFilters
-): SearchHit[] {
-  // 数字を 2 ブロック以上含む (024-... や 02-024) か，純数字のときだけ発動．
-  if (!/\d/.test(query)) return [];
-  const isCodeLike = /^[A-Za-z]?\s*\d+(?:\s*[-\s]\s*\d+)?$/.test(query.trim());
-  if (!isCodeLike) return [];
-  if (filters.kinds && filters.kinds.length > 0 && !filters.kinds.includes('card')) return [];
+/** クエリの 1 セグメントがコードの 1 セグメントに一致するか．
+ * 純数字クエリは数字セグメントとのゼロ埋め無視一致．allowTrailingDigits の
+ * ときだけ参加者接頭 (p02) の末尾数字 (02) にも一致させる — 「02-024」の
+ * 先頭のような複数セグメントクエリの参加者部にのみ使う (単独の「20」が
+ * P20 の全カードにヒットする誤爆を防ぐ)． */
+function codeSegMatches(codeSeg: string, qSeg: string, allowTrailingDigits: boolean): boolean {
+  if (codeSeg === qSeg) return true;
+  if (allowTrailingDigits && /^\d+$/.test(qSeg)) {
+    const m = codeSeg.match(/(\d+)$/);
+    if (m && m[1].replace(/^0+(\d)/, '$1') === qSeg) return true;
+  }
+  return false;
+}
 
-  const nq = normalizeCodeQuery(query);
-  if (!nq) return [];
+/** クエリが数字を含む (= カード番号/コードらしい) ときだけ，コードのセグメント
+ * 単位一致でカードを拾う．新旧 (ゼロ埋め有無) と階層コード (P02-020-01) の
+ * 双方に一致する．
+ *   "20" → P02-020 / P02-020-01 …／ "P02-20" → P02-020(-01) ／ "P02-020-01" → 完全一致
+ * セグメント単位で照合するため "20" が P20-001 (別参加者) に誤ヒットしない．
+ * 参加者・グループ・種別フィルタは呼び出し側に委ねる (score は最上位固定)． */
+export function matchCardCodes(data: ProjectData, query: string): SearchHit[] {
+  const q = query.trim();
+  if (!q || !/\d/.test(q)) return [];
+  const qSegs = looseCardCode(q.replace(/\s+/g, '')).split('-').filter(Boolean);
+  if (qSegs.length === 0) return [];
   const cardGroupId = new Map<string, string>();
   for (const m of data.group_memberships) cardGroupId.set(m.cardId, m.groupId);
 
+  // qSegs が cSegs の「連続部分列」として現れるか．先頭セグメントのみ，複数
+  // セグメントクエリのとき参加者接頭の末尾数字一致 (02 → p02) を許す．
+  const segsMatch = (cSegs: string[]): boolean => {
+    for (let s = 0; s + qSegs.length <= cSegs.length; s++) {
+      let ok = true;
+      for (let j = 0; j < qSegs.length; j++) {
+        const allowTrail = j === 0 && s === 0 && qSegs.length >= 2;
+        if (!codeSegMatches(cSegs[s + j], qSegs[j], allowTrail)) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return true;
+    }
+    return false;
+  };
+
   const hits: SearchHit[] = [];
   for (const c of data.cards) {
-    const nc = normalizeCodeQuery(c.code);
-    if (nc !== nq) continue;
-    if (filters.participantId !== undefined && filters.participantId !== null) {
-      if (c.participantId !== filters.participantId) continue;
-    }
-    const groupId = cardGroupId.get(c.id) ?? null;
-    if (filters.groupId !== undefined) {
-      if (filters.groupId === null && groupId !== null) continue;
-      if (filters.groupId !== null && groupId !== filters.groupId) continue;
-    }
+    if (!segsMatch(looseCardCode(c.code).split('-'))) continue;
     hits.push({
       id: `card:${c.id}`,
       kind: 'card',
@@ -216,7 +240,7 @@ function searchCardCodesExact(
       bodySnippet: snippet(c.body),
       score: Number.MAX_SAFE_INTEGER,
       participantId: c.participantId,
-      groupId,
+      groupId: cardGroupId.get(c.id) ?? null,
     });
   }
   return hits;
@@ -230,9 +254,22 @@ export function searchProject(
   const q = query.trim();
   if (!q) return [];
 
-  // カード番号らしいクエリ (例: 02-024 / P02-024 / 024) は code の完全一致寄りに
-  // 拾い，MiniSearch の緩い一致より優先する．正規化して大小・ゼロ埋め・前置 P を無視．
-  const codeHits = searchCardCodesExact(data, q, filters);
+  // カード番号らしいクエリ (例: 02-024 / P02-024 / 024 / P02-020-01) はコードの
+  // 部分一致で拾い，MiniSearch の緩い一致より優先する (score 最上位)．新旧・
+  // ゼロ埋め有無・階層コードのいずれでもヒットする．
+  const codeHits = matchCardCodes(data, q).filter((h) => {
+    if (filters.kinds && filters.kinds.length > 0 && !filters.kinds.includes('card')) {
+      return false;
+    }
+    if (filters.participantId !== undefined && filters.participantId !== null) {
+      if (h.participantId !== filters.participantId) return false;
+    }
+    if (filters.groupId !== undefined) {
+      if (filters.groupId === null && h.groupId !== null) return false;
+      if (filters.groupId !== null && h.groupId !== filters.groupId) return false;
+    }
+    return true;
+  });
 
   const ms = buildSearchIndex(data);
   const raw = ms.search(q);

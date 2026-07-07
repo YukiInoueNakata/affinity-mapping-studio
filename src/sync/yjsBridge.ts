@@ -13,7 +13,7 @@
 // stays vanilla JS for portability.)
 
 import * as Y from 'yjs';
-import type { ProjectData, ProjectMetadata } from '@shared/types/domain';
+import type { FinalDiagram, ProjectData, ProjectMetadata } from '@shared/types/domain';
 
 /** Tables we mirror.  Order matches `ProjectData`. */
 export const TABLE_NAMES = [
@@ -43,10 +43,24 @@ export const TABLE_NAMES = [
 
 export type TableName = (typeof TABLE_NAMES)[number];
 
+/** 最終図解 (A 型図解化) データ用の root Y.Map 名．
+ *  final_diagram は配列テーブルではなく単一ネストオブジェクトなので，
+ *  'tables' とは別の root Y.Map にトップレベルフィールド単位 (title /
+ *  annotation / groupLayout / shapes / overallNarrative) の LWW で同期する．
+ *  (2026-07 レビュー Critical: TABLE_NAMES に載らないため一切同期されず，
+ *  リモート更新のたびに toProjectData→withData の全置換でローカルからも
+ *  消えていたバグの恒久対策) */
+const FINAL_DIAGRAM_MAP = 'final_diagram';
+
 /** String fields stored as Y.Text for character-level collaborative editing. */
 export const Y_TEXT_FIELDS: Partial<Record<TableName, ReadonlyArray<string>>> = {
   source_segments: ['text'],
   cards: ['body'],
+  // narrative (B 型叙述化の叙述メモ) は長文の共同編集対象なので Y.Text で
+  // 文字レベルマージする (2026-07 レビュー: 全置換 LWW だと同時編集で片方の
+  // 段落が丸ごと消えていた)．既存 doc の plain string は書込時に Y.Text へ
+  // 自動移行される (updateYMapFields の分岐)．
+  groups: ['narrative'],
   labels: ['text', 'sharedMemo', 'basisMemo', 'holdMemo'],
   theoretical_memos: ['body'],
   m_gta_concepts: ['definition'],
@@ -280,6 +294,48 @@ export class YjsSyncBridge {
     this.localOrigin = Symbol('yjsBridge-local');
   }
 
+  /** final_diagram の root Y.Map をトップレベルフィールド単位で next に一致させる．
+   *  next が undefined のときは何もしない (非破壊 — 図解を持たないクライアントの
+   *  無関係な編集で他者の図解を消さないため．削除コマンドは存在しない)．
+   *  必ず transaction 内 (applyLocal / Y.transact) から呼ぶこと． */
+  private reconcileFinalDiagram(next: FinalDiagram | undefined | null): void {
+    if (!next) return;
+    const m = this.doc.getMap(FINAL_DIAGRAM_MAP);
+    const rec = next as unknown as Record<string, unknown>;
+    const nextKeys = new Set<string>();
+    for (const [k, v] of Object.entries(rec)) {
+      if (v === undefined) continue;
+      nextKeys.add(k);
+      const val = Array.isArray(v)
+        ? (v as unknown[]).slice()
+        : isPlainObject(v)
+          ? cloneShallow(v)
+          : v;
+      if (!fieldEquals(m.get(k), val)) m.set(k, val);
+    }
+    for (const k of Array.from(m.keys())) {
+      if (!nextKeys.has(k)) m.delete(k);
+    }
+  }
+
+  /** final_diagram root Y.Map を plain オブジェクトとして読み出す．
+   *  未使用 (空) なら undefined． */
+  private readFinalDiagram(): FinalDiagram | undefined {
+    const m = this.doc.getMap(FINAL_DIAGRAM_MAP);
+    if (m.size === 0) return undefined;
+    const out: Record<string, unknown> = {};
+    m.forEach((v, k) => {
+      if (Array.isArray(v)) {
+        out[k] = (v as unknown[]).slice();
+      } else if (isPlainObject(v)) {
+        out[k] = cloneShallow(v);
+      } else {
+        out[k] = v;
+      }
+    });
+    return out as unknown as FinalDiagram;
+  }
+
   /** Bulk-load ProjectData into the Y.Doc.  Destructive — replaces existing
    *  table contents.  Used when the user opens a project for the first time. */
   seedFromProjectData(data: ProjectData, metadata?: ProjectMetadata): void {
@@ -299,6 +355,7 @@ export class YjsSyncBridge {
           if (records.length === 0) continue;
           arr.push(records.map((r) => recordToYMap(name, r)));
         }
+        this.reconcileFinalDiagram(data?.final_diagram);
         if (metadata) {
           const m = this.doc.getMap('metadata');
           for (const [k, v] of Object.entries(metadata)) {
@@ -421,6 +478,8 @@ export class YjsSyncBridge {
         }
       }
 
+      this.reconcileFinalDiagram(next?.final_diagram);
+
       if (metadata) {
         const m = this.doc.getMap('metadata');
         const nextKeys = new Set(Object.keys(metadata));
@@ -439,13 +498,15 @@ export class YjsSyncBridge {
   /** Snapshot the Y.Doc as plain ProjectData. */
   toProjectData(): ProjectData {
     const tables = this.doc.getMap('tables');
-    const out: Partial<Record<TableName, unknown[]>> = {};
+    const out: Partial<Record<TableName, unknown[]>> & { final_diagram?: FinalDiagram } = {};
     for (const name of TABLE_NAMES) {
       const arr = tables.get(name) as Y.Array<Y.Map<unknown>> | undefined;
       out[name] = arr
         ? uniqById((arr.toArray() as Y.Map<unknown>[]).map((m) => yMapToRecord(m)), name)
         : [];
     }
+    const fd = this.readFinalDiagram();
+    if (fd) out.final_diagram = fd;
     return out as ProjectData;
   }
 

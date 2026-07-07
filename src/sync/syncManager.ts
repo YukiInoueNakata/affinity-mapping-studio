@@ -88,6 +88,11 @@ class SyncManager {
   private pendingEpoch: string | null = null;
   /** epoch 不一致リカバリ中フラグ (再帰的な reconnect ループを防ぐ)． */
   private epochRecovering = false;
+  /** 接続世代カウンタ (2026-07 レビュー)．connect()/disconnect() のたびに進める．
+   *  await を挟む非同期処理は開始時の世代を控え，await 後に世代が変わっていたら
+   *  中断する — 「キャンセルした接続が await 復帰後に復活する」「切断後に epoch
+   *  復旧が勝手に再接続する」再入レースの恒久対策． */
+  private gen = 0;
   /** Codex-C2 (2026-06-16): uploadProject 先着レース検出．
    *  自分が seed したときの doc.clientID．`__sync.seedOwner` が LWW でこの値以外に
    *  収束したら「別クライアントの seed が勝った」= 自分のアップロードは破棄された，
@@ -139,6 +144,7 @@ class SyncManager {
    *  on auth-denied / error within 10 seconds). */
   async connect(opts: ConnectOptions): Promise<void> {
     this.disconnect();
+    const myGen = ++this.gen;
     this.lastOpts = opts;
     // v0.2.16: このルームについて最後に同期した docEpoch を読み込む．
     // サーバーの epoch と不一致なら古い lineage のキャッシュとみなして抑止する．
@@ -157,6 +163,14 @@ class SyncManager {
       await idb.whenSynced;
     } catch {
       // If IndexedDB is unavailable (e.g. private mode) just continue online.
+    }
+    // 世代チェック: この await 中に disconnect()/別の connect() が走っていたら，
+    // ここで静かに手仕舞いする (旧コードはここから無条件に接続を続行し，
+    // キャンセルされた接続が復活していた)．
+    if (myGen !== this.gen) {
+      if (this.idb === idb) this.idb = null;
+      void idb.destroy();
+      throw new Error('接続がキャンセルされました');
     }
     const hadCache = docHasData(doc);
 
@@ -288,6 +302,11 @@ class SyncManager {
           clearTimeout(timer);
           unsub();
           reject(new Error(s.errorDetail ?? s.status));
+        } else if (s.status === 'idle') {
+          // 待機中に disconnect() された (キャンセル)．10 秒待たず即 reject する．
+          clearTimeout(timer);
+          unsub();
+          reject(new Error('接続がキャンセルされました'));
         }
       });
     });
@@ -377,6 +396,12 @@ class SyncManager {
   }
 
   disconnect(): void {
+    // 進行中の connect()/epoch 復旧を無効化する (世代カウンタ)．
+    this.gen++;
+    // 明示的に切断したら「直近の接続先」も破棄する (epoch 復旧などの自動再接続が
+    // 切断後のルームへ戻ってしまうのを防ぐ)．connect() は disconnect() 後に
+    // lastOpts を設定し直すため影響しない．
+    this.lastOpts = null;
     if (this.seedOwnerUnobserve) {
       this.seedOwnerUnobserve();
       this.seedOwnerUnobserve = null;
@@ -423,8 +448,14 @@ class SyncManager {
       // 1. 自分の IndexedDB 接続を確実に閉じる．disconnect() は idb.destroy() を
       //    await しないので，ここで明示的に待つ（待たないと自分が deleteDatabase の
       //    blocker になり onblocked へ落ちる）．
+      //    lastOpts は disconnect() でクリアされるため先に控える．
+      const opts = this.lastOpts;
       const idb = this.idb;
       this.disconnect();
+      // この復旧サイクルの世代．以降ユーザーが明示的に disconnect()/connect()
+      // したら gen が進み，末尾の自動再接続を中止する (2026-07 レビュー:
+      // 「切断したのに epoch 復旧が勝手に再接続する」対策)．
+      const myGen = this.gen;
       if (idb) {
         try {
           await idb.destroy();
@@ -446,8 +477,9 @@ class SyncManager {
             `epoch は据え置き，次回接続で再試行します．`,
         );
       }
-      const opts = this.lastOpts;
-      if (opts && opts.roomId === roomId) {
+      // 4. 復旧中にユーザーが操作していなければ (世代不変)，元の接続先へ
+      //    download-only で再接続する．
+      if (opts && opts.roomId === roomId && this.gen === myGen) {
         await this.connect(opts);
       }
     } catch (err) {

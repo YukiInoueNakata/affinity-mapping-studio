@@ -92,6 +92,78 @@ describe('YjsSyncBridge — schema constants', () => {
   });
 });
 
+describe('YjsSyncBridge — final_diagram sync (2026-07 レビュー Critical A1)', () => {
+  const fd = () => ({
+    title: '最終図解',
+    annotation: { date: '2026-07-08', authors: '中田' },
+    groupLayout: { g1: { x: 10, y: 20, width: 300, height: 200 } },
+    shapes: [
+      {
+        id: 'sh1',
+        kind: 'circle' as const,
+        x: 1,
+        y: 2,
+        width: 30,
+        height: 40,
+        rotation: 0,
+        label: '島 A',
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    ],
+    overallNarrative: '全体叙述',
+  });
+
+  it('seed → toProjectData round-trips final_diagram', () => {
+    const bridge = new YjsSyncBridge();
+    const data = { ...sampleData(), final_diagram: fd() };
+    bridge.seedFromProjectData(data);
+    const out = bridge.toProjectData();
+    expect(out.final_diagram).toBeDefined();
+    expect(out.final_diagram?.title).toBe('最終図解');
+    expect(out.final_diagram?.shapes).toHaveLength(1);
+    expect(out.final_diagram?.groupLayout.g1).toEqual({ x: 10, y: 20, width: 300, height: 200 });
+    expect(out.final_diagram?.overallNarrative).toBe('全体叙述');
+  });
+
+  it('applyDiff propagates final_diagram edits to another client', () => {
+    // client A → update encode → client B の 2 doc 間で伝播することを確認
+    const docA = new Y.Doc();
+    const docB = new Y.Doc();
+    const a = new YjsSyncBridge(docA);
+    const b = new YjsSyncBridge(docB);
+    a.seedFromProjectData({ ...sampleData(), final_diagram: fd() });
+    Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+    expect(b.toProjectData().final_diagram?.title).toBe('最終図解');
+
+    // A が表題を変更 → B にも反映
+    const next = { ...sampleData(), final_diagram: { ...fd(), title: '改訂表題' } };
+    a.applyDiff(next);
+    Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+    expect(b.toProjectData().final_diagram?.title).toBe('改訂表題');
+  });
+
+  it('applyDiff with undefined final_diagram does NOT wipe the shared one', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.seedFromProjectData({ ...sampleData(), final_diagram: fd() });
+    // 図解を持たない状態 (undefined) の diff — 非破壊であること
+    bridge.applyDiff(sampleData());
+    expect(bridge.toProjectData().final_diagram?.title).toBe('最終図解');
+  });
+
+  it('remote update with unrelated table edit keeps final_diagram in toProjectData', () => {
+    const bridge = new YjsSyncBridge();
+    bridge.seedFromProjectData({ ...sampleData(), final_diagram: fd() });
+    // 無関係なカード編集の diff 後も final_diagram は残る
+    const next = { ...sampleData(), final_diagram: fd() };
+    next.cards = [{ ...next.cards[0], body: '編集後' }];
+    bridge.applyDiff(next);
+    const out = bridge.toProjectData();
+    expect(out.cards[0].body).toBe('編集後');
+    expect(out.final_diagram?.title).toBe('最終図解');
+  });
+});
+
 describe('YjsSyncBridge — seed + dump round-trip', () => {
   it('preserves all 22 tables', () => {
     const bridge = new YjsSyncBridge();

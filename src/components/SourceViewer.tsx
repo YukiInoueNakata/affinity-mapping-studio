@@ -581,7 +581,7 @@ export function SourceViewer() {
     }
     const codes = oldCards
       .slice()
-      .sort((a, b) => a.serialNumber - b.serialNumber)
+      .sort((a, b) => a.code.localeCompare(b.code))
       .map((c) => c.code)
       .join(', ');
     if (

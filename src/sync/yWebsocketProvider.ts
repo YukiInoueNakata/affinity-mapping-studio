@@ -373,7 +373,26 @@ export class YjsWebsocketProvider {
       const reply = encoding.createEncoder();
       encoding.writeVarUint(reply, MESSAGE_SYNC);
       const beforeCards = (this.opts.doc.getMap('tables').get('cards') as { length?: number } | undefined)?.length ?? 0;
-      const msgType = syncProtocol.readSyncMessage(dec, reply, this.opts.doc, this);
+      // 2026-07 レビュー: 破損 payload で readSyncMessage が throw すると
+      // onmessage 内の未捕捉例外となり，UI は connecting のまま沈黙する．
+      // 捕捉して error イベントに変換し，ソケットを閉じて clean 再同期に任せる．
+      let msgType: number;
+      try {
+        msgType = syncProtocol.readSyncMessage(dec, reply, this.opts.doc, this);
+      } catch (err) {
+        console.error('[provider] malformed sync message:', err);
+        this.emit({
+          type: 'error',
+          error: err instanceof Error ? err : new Error(String(err)),
+        });
+        // 部分適用の可能性がある接続は継続しない．close → 再接続で全量再同期．
+        try {
+          this.ws?.close();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       const afterCards = (this.opts.doc.getMap('tables').get('cards') as { length?: number } | undefined)?.length ?? 0;
       // 2026-06-02 debug ログ
       console.info('[provider.msg] sync', {

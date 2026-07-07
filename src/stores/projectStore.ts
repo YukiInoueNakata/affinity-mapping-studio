@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { makeEmptyProject, type ProjectFile } from '@shared/types/project';
+import { backfillProjectData, makeEmptyProject, type ProjectFile } from '@shared/types/project';
 import type { DisplaySettings, ProjectData, ProjectMetadata } from '@shared/types/domain';
 import type { DomainCommand } from './commands.js';
 import { confirmBulkOperation, BULK_CONFIRM_THRESHOLD } from '../utils/bulkGuard.js';
@@ -168,6 +168,10 @@ function migrateRelationSchema(
   metadata?: ProjectMetadata | null
 ): void {
   if (data) normalizeProjectRelations(data);
+  // final_diagram は data 側に保存される (旧レイアウトの metadata 側も
+  // 後方互換のため見る)．
+  const fdData = (data as { final_diagram?: unknown } | null | undefined)?.final_diagram;
+  if (fdData) normalizeFinalDiagramShapes(fdData);
   const fd = (metadata as { final_diagram?: unknown } | null | undefined)?.final_diagram;
   if (fd) normalizeFinalDiagramShapes(fd);
 }
@@ -223,10 +227,14 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   },
 
   loadProject(filePath, project) {
-    migrateRelationSchema(project?.data, project?.metadata);
+    // 旧スキーマ由来の欠損テーブルを空配列で補完 (白画面クラッシュ防止)．
+    const normalized = project
+      ? withData(project, backfillProjectData(project.data))
+      : project;
+    migrateRelationSchema(normalized?.data, normalized?.metadata);
     set({
       filePath,
-      project,
+      project: normalized,
       selectedCardId: null,
       selectedCardIds: [],
       selectedGroupId: null,
@@ -480,7 +488,8 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     );
     if (!snap) return;
     // Deep-clone so the active store does not share refs with the stored snapshot
-    const restoredData = JSON.parse(JSON.stringify(snap.data));
+    // (旧バージョンのスナップショットは後発テーブルを欠くため backfill も通す)
+    const restoredData = backfillProjectData(JSON.parse(JSON.stringify(snap.data)));
     migrateRelationSchema(restoredData, project.metadata);
     set({
       project: withData(project, restoredData),
@@ -559,6 +568,11 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       try {
         migrateRelationSchema(remoteData, remoteMeta as ProjectMetadata | null);
         if (cur) {
+          // final_diagram 防御: リモート (旧クライアントのみの部屋等) が
+          // final_diagram を持たない場合，全置換でローカルの図解を消さない．
+          if (!remoteData.final_diagram && cur.data.final_diagram) {
+            remoteData.final_diagram = cur.data.final_diagram;
+          }
           // Codex-W2: remote の metadata 変更 (名称 / displaySettings 等) も反映する．
           set({
             project: {
@@ -608,6 +622,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       const meta = bridge.toMetadata();
       migrateRelationSchema(data, meta as ProjectMetadata | null);
       if (cur) {
+        // final_diagram 防御: リモート側に無ければローカルの図解を保持する．
+        if (!data.final_diagram && cur.data.final_diagram) {
+          data.final_diagram = cur.data.final_diagram;
+        }
         set({
           project: {
             ...withData(cur, data),

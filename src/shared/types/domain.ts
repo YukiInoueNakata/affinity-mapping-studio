@@ -68,6 +68,12 @@ export interface Card {
    * was created from.  Shown as a provenance sub-label (e.g. "← 003,005").
    * Absent for normal (non-merged) cards. */
   mergedFrom?: number[];
+  /** For merged cards (0.2.28+): the display CODES of the source cards
+   * (e.g. ["P02-020-01", "P02-020-02"]).  Split-derived cards carry
+   * hierarchical codes decoupled from serialNumber, so serial-based
+   * mergedFrom can no longer reproduce the displayed code — prefer this
+   * field for provenance display, falling back to mergedFrom. */
+  mergedFromCodes?: string[];
   /** For merged cards: a full snapshot of the source cards (and their links,
    * positions, memberships) captured at merge time, so the merge can be undone
    * at any time via "統合を解除" (not just in-session Undo).  Absent for normal

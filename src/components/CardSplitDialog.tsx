@@ -300,7 +300,9 @@ export function CardSplitDialog({ open, card, onClose, onConfirm }: Props) {
           </div>
 
           <p className="muted small">
-            分割後の各カードには，元カードの<strong>原文リンクが全て複製</strong>されます（参照を残すため）．
+            分割後のカード ID は<strong>元カードの ID に連番を付けた階層形式</strong>になります
+            （例: {card.code} → {card.code}-01, {card.code}-02, …．分割前のカードが ID から分かります）．
+            各カードには元カードの<strong>原文リンクが全て複製</strong>されます（参照を残すため）．
             不要な参照は分割後に各カードから手動で外してください．グループ所属も継承．
           </p>
         </div>

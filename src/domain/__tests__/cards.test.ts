@@ -313,7 +313,7 @@ describe('buildSplitCards', () => {
     return data;
   }
 
-  it('splits a card: first part keeps the original code, rest get new serials', () => {
+  it('splits a card into hierarchical child codes (parent-NN)', () => {
     const data = setupOneCard('AAA\nBBB\nCCC');
     const out = buildSplitCards(data, {
       cardId: 'c1',
@@ -321,11 +321,33 @@ describe('buildSplitCards', () => {
       now: NOW,
     });
     expect(out.newCards).toHaveLength(3);
-    // 先頭は元カードの番号 (P01-001) を維持，2 枚目以降のみ新規採番．
-    expect(out.newCards.map((c) => c.code)).toEqual(['P01-001', 'P01-002', 'P01-003']);
-    expect(out.newCards[0].serialNumber).toBe(out.oldCard.serialNumber);
+    // 子カードは親コードに 2 桁連番を付す (P01-001 → P01-001-01 …)．
+    expect(out.newCards.map((c) => c.code)).toEqual([
+      'P01-001-01',
+      'P01-001-02',
+      'P01-001-03',
+    ]);
+    // 内部 serial は新規採番 (元 serial=1 は永久欠番として再利用しない)．
+    expect(out.newCards.every((c) => c.serialNumber > out.oldCard.serialNumber)).toBe(true);
+    // serial は一意．
+    expect(new Set(out.newCards.map((c) => c.serialNumber)).size).toBe(3);
     expect(out.newCards.map((c) => c.body)).toEqual(['AAA', 'BBB', 'CCC']);
     expect(out.oldCard.id).toBe('c1');
+  });
+
+  it('re-splitting a child nests the code one level deeper', () => {
+    const data = setupOneCard('AAA\nBBB');
+    // 既に分割済みの子カード P01-001-01 を分割する状況を模す．
+    data.cards[0] = { ...data.cards[0], code: 'P01-001-01' };
+    const out = buildSplitCards(data, {
+      cardId: 'c1',
+      bodyParts: ['AAA', 'BBB'],
+      now: NOW,
+    });
+    expect(out.newCards.map((c) => c.code)).toEqual([
+      'P01-001-01-01',
+      'P01-001-01-02',
+    ]);
   });
 
   it('clones source_links to each new card', () => {
@@ -463,6 +485,17 @@ describe('buildUnmergeCard', () => {
       new Set(un.restoredCards.map((c) => c.id))
     );
     expect(un.mergedCard.id).toBe('merged1');
+  });
+
+  it('merge records mergedFromCodes so split-derived (hierarchical) codes survive', () => {
+    const data = setupTwoCards();
+    // c2 を分割由来の階層コードに差し替え (serial と code の分離状態を模す)．
+    data.cards[1] = { ...data.cards[1], code: 'P01-001-02', serialNumber: 55 };
+    const merged = buildMergedCard(data, { cardIds: ['c1', 'c2'], now: NOW });
+    // 表示用の結合元コードは実際の code をそのまま保持する．
+    expect(merged.newCard.mergedFromCodes).toEqual(['P01-001', 'P01-001-02']);
+    // 旧 serial ベースの mergedFrom も後方互換のため残る．
+    expect(merged.newCard.mergedFrom).toEqual([1, 55]);
   });
 
   it('canUnmergeCard: true for snapshot or legacy mergedFrom, false otherwise', () => {

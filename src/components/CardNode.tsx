@@ -23,6 +23,9 @@ export interface CardNodeData {
   collapsed?: boolean;
   /** (#7) source serials for a merged card → shown as "← 003,005". */
   mergedFrom?: number[];
+  /** 0.2.28+: source CODES for a merged card (分割由来の階層コード対応)．
+   * あればこちらを優先表示する． */
+  mergedFromCodes?: string[];
 }
 
 function CardNodeImpl({ id, data, selected }: NodeProps<CardNodeData>) {
@@ -127,14 +130,26 @@ function CardNodeImpl({ id, data, selected }: NodeProps<CardNodeData>) {
           {isCollapsed ? '▶' : '▼'}
         </button>
         <span>{data.code}</span>
-        {data.mergedFrom && data.mergedFrom.length > 0 && (
-          <span
-            className="card-node-merged-from"
-            title={`結合元: ${data.mergedFrom.map((n) => String(n).padStart(3, '0')).join(', ')}`}
-          >
-            ← {data.mergedFrom.map((n) => String(n).padStart(3, '0')).join(',')}
-          </span>
-        )}
+        {(() => {
+          // 結合元表示: code ベース (0.2.28+) を優先し，旧データは serial から復元．
+          const sources =
+            data.mergedFromCodes && data.mergedFromCodes.length > 0
+              ? data.mergedFromCodes.map((c) => c.replace(/^[A-Za-z0-9]+-/, ''))
+              : (data.mergedFrom ?? []).map((n) => String(n).padStart(3, '0'));
+          const fullSources =
+            data.mergedFromCodes && data.mergedFromCodes.length > 0
+              ? data.mergedFromCodes
+              : (data.mergedFrom ?? []).map((n) => String(n).padStart(3, '0'));
+          if (sources.length === 0) return null;
+          return (
+            <span
+              className="card-node-merged-from"
+              title={`結合元: ${fullSources.join(', ')}`}
+            >
+              ← {sources.join(',')}
+            </span>
+          );
+        })()}
       </div>
       {isCollapsed ? null : editing ? (
         <textarea

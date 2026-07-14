@@ -123,6 +123,35 @@ describe('projectStore + YjsSyncBridge — remote changes flow into store', () =
     expect(after.project?.data.participants[0].code).toBe('R01');
   });
 
+  it('リモート反映では isDirty を立てない (レビュー rank4/10/18 回帰)', () => {
+    // 回帰: 旧実装は observe の cur 分岐で isDirty:true を立て，接続中に isDirty が
+    // 貼り付いて終了ガードが毎回発火 (窓が閉じない/点滅) し，ローカル .kjproj を
+    // 自動保存が縮小状態で静かに上書きした．リモート由来の反映は「未保存のローカル
+    // 変更」ではないので isDirty は false のままであるべき．
+    const store = useProjectStore.getState();
+    store.loadProject(null, freshProject());
+    const localBridge = new YjsSyncBridge();
+    store.attachSyncBridge(localBridge);
+    expect(useProjectStore.getState().isDirty).toBe(false);
+
+    const remoteBridge = new YjsSyncBridge();
+    Y.applyUpdate(remoteBridge.doc, Y.encodeStateAsUpdate(localBridge.doc));
+    remoteBridge.appendRecord('participants', {
+      id: 'remote-p2',
+      code: 'R02',
+      displayName: 'R02',
+      createdAt: NOW,
+    });
+    Y.applyUpdate(
+      localBridge.doc,
+      Y.encodeStateAsUpdate(remoteBridge.doc, Y.encodeStateVector(localBridge.doc))
+    );
+
+    const after = useProjectStore.getState();
+    expect(after.project?.data.participants).toHaveLength(1);
+    expect(after.isDirty).toBe(false); // リモート反映で dirty にならない
+  });
+
   it('two stores via two bridges converge after exchanging updates', () => {
     // Set up store A
     const storeA = useProjectStore.getState();

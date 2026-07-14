@@ -579,7 +579,14 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
               ...withData(cur, remoteData),
               metadata: remoteMeta ? { ...cur.metadata, ...remoteMeta } : cur.metadata,
             },
-            isDirty: true,
+            // 2026-07-14 レビュー rank4/10/18: リモート同期由来の反映では isDirty を
+            // 立てない．この observe は接続中のみ発火する．旧実装の isDirty:true は
+            // (a) 接続中に isDirty が貼り付き，終了ガード (App.tsx onCloseRequested) が
+            // 毎回発火して窓が閉じない・点滅を招き，(b) ローカル .kjproj を開いたまま
+            // 接続すると自動保存が縮小/マージ済み状態でローカル正本を静かに上書きした．
+            // 共同編集ではサーバーが正本なのでリモート反映は「未保存のローカル変更」で
+            // ない．synth-shell 分岐 (下) も isDirty:false で整合する．
+            isDirty: false,
           });
           console.info('[sync.observe] store updated (cur branch)', {
             cards: get().project?.data.cards.length,

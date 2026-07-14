@@ -521,13 +521,32 @@ export function App() {
     void (async () => {
       try {
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const un = await getCurrentWindow().onCloseRequested((event) => {
+        const un = await getCurrentWindow().onCloseRequested(async (event) => {
           const dirty = useProjectStore.getState().isDirty;
-          if (
-            dirty &&
-            !confirm('未保存の変更があります。保存せずに終了しますか？')
-          ) {
-            event.preventDefault();
+          if (!dirty) return; // 未保存が無ければそのまま閉じる
+          // 2026-07-14 レビュー rank10: 同期 window.confirm は onCloseRequested
+          // (ユーザージェスチャ外) では WebView2 で表示されず false を返し，
+          // preventDefault で窓が閉じなくなる．非同期の Tauri ダイアログを await する．
+          // await の前に同期的に preventDefault してから確認する．
+          event.preventDefault();
+          let ok = false;
+          try {
+            const { ask } = await import('@tauri-apps/plugin-dialog');
+            ok = await ask('未保存の変更があります。保存せずに終了しますか？', {
+              title: '終了確認',
+              kind: 'warning',
+            });
+          } catch (e) {
+            console.warn('[close-guard] dialog failed, keeping window open:', e);
+            return;
+          }
+          if (ok) {
+            // 再度 onCloseRequested を発火させないよう destroy で強制的に閉じる
+            try {
+              await getCurrentWindow().destroy();
+            } catch {
+              /* ignore */
+            }
           }
         });
         if (disposed) un();

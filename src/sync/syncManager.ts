@@ -451,6 +451,49 @@ class SyncManager {
       //    lastOpts は disconnect() でクリアされるため先に控える．
       const opts = this.lastOpts;
       const idb = this.idb;
+      // レビュー rank5: IndexedDB を破棄する前に，未同期のオフライン編集を含み得る
+      // ローカル doc をベストエフォートで退避し，破棄件数を fail-loud で提示する．
+      // 旧実装は無確認・無退避で削除し，痕跡は console.warn のみだった (研究データが
+      // メモリ/ディスク両方から無言消失)．この退避は既存の削除ロジックには手を入れず，
+      // 破棄前に「復元可能なコピー」を残すだけの純粋な追加．
+      try {
+        const bridge = this.bridge;
+        if (bridge) {
+          const data = bridge.toProjectData();
+          const counts = {
+            participants: data.participants.length,
+            source_segments: data.source_segments.length,
+            cards: data.cards.length,
+            groups: data.groups.length,
+          };
+          const update = Y.encodeStateAsUpdate(bridge.doc);
+          const backupKey = `kj-epoch-backup-${roomId}-${Date.now()}`;
+          let backedUp = false;
+          try {
+            let bin = '';
+            for (let i = 0; i < update.length; i++) bin += String.fromCharCode(update[i]);
+            const b64 = btoa(bin);
+            // localStorage の容量上限 (概ね 5MB) を超えないぶんだけ退避する．
+            if (b64.length <= 4_000_000) {
+              localStorage.setItem(backupKey, b64);
+              backedUp = true;
+            }
+          } catch {
+            /* quota 超過等は下の fail-loud で通知 */
+          }
+          // fail-loud: console.error で診断バッファ (SyncConnectDialog の
+          // 「診断ログをコピー」) にも残す．無言削除にしない．
+          console.error(
+            `[sync] epoch 不一致でローカルキャッシュを破棄します (未同期のオフライン編集を含む可能性)．` +
+              `件数=${JSON.stringify(counts)}．` +
+              (backedUp
+                ? `破棄前に localStorage["${backupKey}"] へ退避しました (復元可能)．`
+                : `退避に失敗しました (容量超過等)．重要な未同期編集があればアプリを閉じる前にエクスポートしてください．`),
+          );
+        }
+      } catch (e) {
+        console.error('[sync] epoch recovery backup failed:', e);
+      }
       this.disconnect();
       // この復旧サイクルの世代．以降ユーザーが明示的に disconnect()/connect()
       // したら gen が進み，末尾の自動再接続を中止する (2026-07 レビュー:

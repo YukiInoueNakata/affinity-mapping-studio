@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
+import { useSyncManager } from '../sync/useSyncManager.js';
 import { buildSnapshot, diffSnapshots, type SnapshotDiffSummary } from '../domain/snapshots.js';
 
 interface Props {
@@ -14,6 +15,7 @@ export function VersionHistoryDialog({ open, onClose }: Props) {
   const addSnapshot = useProjectStore((s) => s.addSnapshot);
   const removeSnapshot = useProjectStore((s) => s.removeSnapshot);
   const restoreSnapshot = useProjectStore((s) => s.restoreSnapshot);
+  const { state: syncState } = useSyncManager();
 
   const [view, setView] = useState<View>('list');
   const [labelInput, setLabelInput] = useState('');
@@ -55,13 +57,19 @@ export function VersionHistoryDialog({ open, onClose }: Props) {
   };
 
   const handleRestore = (id: string) => {
-    if (
-      !confirm(
-        'このスナップショットの状態でプロジェクトを上書きしますか？\n' +
-          '現在の状態は失われます (保存しなければファイルには反映されません)'
-      )
-    )
-      return;
+    // レビュー rank3: 接続中の復元は applyDiff で「スナップショット以後に他の参加者が
+    // 追加したカード/グループ」をルーム全体から削除し，全員に伝播する (ローカル可逆
+    // ではない)．旧確認文「保存しなければファイルには反映されません」は誤誘導だった．
+    // 接続中は破壊範囲を明示して強く警告する．
+    const connected = syncState.status === 'connected';
+    const msg = connected
+      ? '【共同編集ルームに接続中】このスナップショットの状態でルーム全体を上書きします。\n' +
+        `スナップショット取得後に他の参加者が追加した編集は、全員から削除され元に戻せません` +
+        (syncState.meta?.roomId ? `（ルーム: ${syncState.meta.roomId}）` : '') +
+        '。\n本当に実行しますか？'
+      : 'このスナップショットの状態でプロジェクトを上書きしますか？\n' +
+        '現在の状態は失われます (保存しなければファイルには反映されません)';
+    if (!confirm(msg)) return;
     restoreSnapshot(id);
     onClose();
   };

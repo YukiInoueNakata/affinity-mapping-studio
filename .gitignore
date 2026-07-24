@@ -17,3 +17,7 @@ Thumbs.db
 *.kjproj.tmp
 !sample-*.kjproj
 !sample-*.kjproj.json
+
+# 内部・作業ログ系（public repo につき commit しない・グローバル規約）
+CLAUDE.md
+WORKLOG.md

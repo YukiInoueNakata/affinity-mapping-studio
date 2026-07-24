@@ -487,6 +487,8 @@ export interface DisplaySettings {
    *  未指定は true 扱い（従来どおり省略）．false で全カード全文表示（省略 OFF）．
    *  個別カードの Card.bodyDisplay が優先する． */
   cardTruncate?: boolean;
+  /** キャンバス上のグループに連番コード（例 "L1-3"）を表示するか．未指定は false． */
+  showGroupCode?: boolean;
   cardWrapWidth?: number;
   cardFontSize?: number;
   groupFontSize?: number;

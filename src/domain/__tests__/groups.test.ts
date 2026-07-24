@@ -4,6 +4,7 @@ import {
   buildGroupFromCards,
   buildParentGroup,
   collectGroupDescendantsForDrag,
+  computeGroupCodes,
   flattenGroupTree,
   getCardGroupId,
   getGroupMembers,
@@ -272,5 +273,43 @@ describe('group membership queries', () => {
     );
     expect(getGroupMembers(data, 'g1').map((c) => c.id).sort()).toEqual(['c1', 'c2']);
     expect(getUngroupedCards(data).map((c) => c.id)).toEqual(['c3']);
+  });
+});
+
+describe('computeGroupCodes（グループ連番コード）', () => {
+  const g = (id: string, level: number, createdAt: string) => ({
+    id,
+    name: id,
+    level,
+    parentGroupId: null,
+    collapsed: false,
+    createdAt,
+    updatedAt: createdAt,
+  });
+
+  it('レベルごとに createdAt 順で 1 始まりの連番を振る', () => {
+    const groups = [
+      g('b', 1, '2026-05-18T00:00:02.000Z'),
+      g('a', 1, '2026-05-18T00:00:01.000Z'),
+      g('p', 2, '2026-05-18T00:00:03.000Z'),
+    ];
+    const codes = computeGroupCodes(groups);
+    expect(codes.get('a')).toBe('L1-1');
+    expect(codes.get('b')).toBe('L1-2');
+    expect(codes.get('p')).toBe('L2-1');
+  });
+
+  it('createdAt が同値なら id で安定ソートする（全クライアントで一致）', () => {
+    const groups = [
+      g('z', 1, '2026-05-18T00:00:00.000Z'),
+      g('a', 1, '2026-05-18T00:00:00.000Z'),
+    ];
+    const codes = computeGroupCodes(groups);
+    expect(codes.get('a')).toBe('L1-1');
+    expect(codes.get('z')).toBe('L1-2');
+  });
+
+  it('空配列では空の Map を返す', () => {
+    expect(computeGroupCodes([]).size).toBe(0);
   });
 });

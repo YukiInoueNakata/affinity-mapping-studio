@@ -3111,6 +3111,18 @@ mark.search-match {
   font-size: 11px;
 }
 
+/* グループ連番コード（例 "L1-3"）バッジ — showGroupCode が ON のとき表札の前に出す */
+.kj-group-node-code {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: #555;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 3px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
 /* react flow overrides — force white bg / black border / black icons for
  * visibility (default React Flow #fefefe + our old var(--bg-elev) looked gray) */
 .react-flow__controls {

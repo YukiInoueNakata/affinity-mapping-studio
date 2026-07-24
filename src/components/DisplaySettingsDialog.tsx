@@ -11,6 +11,7 @@ interface Props {
 const DEFAULTS = {
   cardMaxChars: 90,
   cardTruncate: true,
+  showGroupCode: false,
   cardWrapWidth: 220,
   cardFontSize: 12,
   groupFontSize: 12,
@@ -29,6 +30,9 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
   );
   const [cardTruncate, setCardTruncate] = useState<boolean>(
     current?.cardTruncate ?? DEFAULTS.cardTruncate
+  );
+  const [showGroupCode, setShowGroupCode] = useState<boolean>(
+    current?.showGroupCode ?? DEFAULTS.showGroupCode
   );
   const [cardWrapWidth, setCardWrapWidth] = useState<number>(
     current?.cardWrapWidth ?? DEFAULTS.cardWrapWidth
@@ -56,6 +60,7 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
     if (!open) return;
     setCardMaxChars(current?.cardMaxChars ?? DEFAULTS.cardMaxChars);
     setCardTruncate(current?.cardTruncate ?? DEFAULTS.cardTruncate);
+    setShowGroupCode(current?.showGroupCode ?? DEFAULTS.showGroupCode);
     setCardWrapWidth(current?.cardWrapWidth ?? DEFAULTS.cardWrapWidth);
     setCardFontSize(current?.cardFontSize ?? DEFAULTS.cardFontSize);
     setGroupFontSize(current?.groupFontSize ?? DEFAULTS.groupFontSize);
@@ -71,6 +76,7 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
     const next: DisplaySettings = {
       cardMaxChars,
       cardTruncate,
+      showGroupCode,
       cardWrapWidth,
       cardFontSize,
       groupFontSize,
@@ -153,6 +159,20 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
               value={groupFontSize}
               onChange={(e) => setGroupFontSize(Number(e.target.value))}
             />
+          </div>
+          <div className="form-row">
+            <label htmlFor="showGroupCode">グループコード表示</label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                id="showGroupCode"
+                type="checkbox"
+                checked={showGroupCode}
+                onChange={(e) => setShowGroupCode(e.target.checked)}
+              />
+              <span className="muted small">
+                キャンバスのグループに連番コード（例 L1-3）を表示する（標準: OFF）．
+              </span>
+            </label>
           </div>
           <fieldset
             style={{

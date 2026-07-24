@@ -8,6 +8,34 @@ import type {
 } from '@shared/types/domain';
 import { newId } from './ids.js';
 
+/** キャンバス表示用のグループ連番コード（例 "L1-3"）を算出する．
+ *  レベルごとに createdAt（同値は id）で並べ，1 始まりの連番を振る．
+ *  createdAt/id は同期データなので，全クライアントで同一のコードになる（共同編集で一致）． */
+export function computeGroupCodes(groups: Group[]): Map<string, string> {
+  const byLevel = new Map<number, Group[]>();
+  for (const g of groups) {
+    const arr = byLevel.get(g.level) ?? [];
+    arr.push(g);
+    byLevel.set(g.level, arr);
+  }
+  const out = new Map<string, string>();
+  for (const [level, gs] of byLevel) {
+    const sorted = [...gs].sort((a, b) =>
+      a.createdAt !== b.createdAt
+        ? a.createdAt < b.createdAt
+          ? -1
+          : 1
+        : a.id < b.id
+          ? -1
+          : a.id > b.id
+            ? 1
+            : 0
+    );
+    sorted.forEach((g, i) => out.set(g.id, `L${level}-${i + 1}`));
+  }
+  return out;
+}
+
 export function nextGroupName(data: ProjectData): string {
   return nextHierarchyGroupName(data, 1);
 }

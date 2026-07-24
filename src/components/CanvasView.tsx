@@ -63,6 +63,7 @@ import {
   collectGroupDescendantsForDrag,
   computeCascadedGroupBoundsUpdates,
   computeGroupAutoBounds,
+  computeGroupCodes,
   packGroupCards,
   getContainerGroupIds,
   getGroupLabel,
@@ -387,6 +388,8 @@ function CanvasViewImpl() {
           if (hiddenGroupSet.has(m.groupId)) cardsHiddenByGroup.add(m.cardId);
         }
       }
+      // グループ連番コード（例 "L1-3"）．createdAt/id 基準で全クライアント一致．表示は showGroupCode 制御．
+      const groupCodeMap = computeGroupCodes(project.data.groups);
       const groupNodes: Node<GroupNodeData>[] = project.data.groups
         .filter((g) => !hiddenIds.has(g.id))
         .filter((g) => !hiddenGroupSet.has(g.id))
@@ -412,6 +415,8 @@ function CanvasViewImpl() {
             selected: isSelected,
             level: g.level,
             collapsed: g.collapsed,
+            code: groupCodeMap.get(g.id),
+            showCode: settings?.showGroupCode,
             effectiveFontSize: g.displayStyle?.fontSize ?? settings?.groupFontSize,
             effectiveFontWeight: g.displayStyle?.fontWeight,
             effectiveColor: g.displayStyle?.color,

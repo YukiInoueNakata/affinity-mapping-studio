@@ -27,6 +27,10 @@ export interface GroupNodeData {
   selected: boolean;
   level: number;
   collapsed: boolean;
+  /** 連番コード（例 "L1-3"）．showCode が true のとき表札の前に表示する． */
+  code?: string;
+  /** コード表示のトグル（DisplaySettings.showGroupCode）． */
+  showCode?: boolean;
   effectiveFontSize?: number;
   effectiveFontWeight?: 'normal' | 'bold';
   effectiveColor?: string;
@@ -272,6 +276,11 @@ function GroupNodeImpl({ id, data, selected }: NodeProps<GroupNodeData>) {
           >
             {isCollapsed ? '▶' : '▼'}
           </button>
+          {data.showCode && data.code && (
+            <span className="kj-group-node-code" title={`グループコード: ${data.code}`}>
+              {data.code}
+            </span>
+          )}
           {editing ? (
             <textarea
               ref={editInputRef}

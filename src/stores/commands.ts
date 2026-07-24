@@ -2422,6 +2422,36 @@ export function makeToggleCardCollapsedCommand(
   };
 }
 
+/** カード本文の省略/全文表示の個別上書き．undo/redo 可・共同編集で同期される．
+ *  next / prev が undefined のときは「全体設定に従う」状態を表す． */
+export function makeSetCardBodyDisplayCommand(
+  cardId: string,
+  nextBodyDisplay: 'full' | 'truncated' | undefined,
+  prevBodyDisplay: 'full' | 'truncated' | undefined,
+  now: string,
+  prevUpdatedAt: string
+): DomainCommand {
+  const setField = (
+    d: ProjectData,
+    value: 'full' | 'truncated' | undefined,
+    updatedAt: string
+  ): ProjectData => ({
+    ...d,
+    cards: d.cards.map((c) => {
+      if (c.id !== cardId) return c;
+      const nc = { ...c, updatedAt };
+      if (value === undefined) delete nc.bodyDisplay;
+      else nc.bodyDisplay = value;
+      return nc;
+    }),
+  });
+  return {
+    label: `カード表示: ${cardId} → ${nextBodyDisplay ?? '既定'}`,
+    apply: (d) => setField(d, nextBodyDisplay, now),
+    revert: (d) => setField(d, prevBodyDisplay, prevUpdatedAt),
+  };
+}
+
 export function makeRenameGroupCommand(
   groupId: string,
   prevName: string,

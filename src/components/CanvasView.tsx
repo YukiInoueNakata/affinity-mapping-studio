@@ -464,6 +464,8 @@ function CanvasViewImpl() {
             effectiveBorderWidth: cardStyle?.borderWidth,
             effectiveBorderStyle: cardStyle?.borderStyle,
             maxChars: settings?.cardMaxChars,
+            cardTruncate: settings?.cardTruncate,
+            bodyDisplay: c.bodyDisplay,
             collapsed,
             mergedFrom: c.mergedFrom,
             mergedFromCodes: c.mergedFromCodes,

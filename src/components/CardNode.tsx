@@ -20,6 +20,10 @@ export interface CardNodeData {
   effectiveBorderWidth?: number;
   effectiveBorderStyle?: 'solid' | 'dashed' | 'dotted';
   maxChars?: number;
+  /** 全体設定: 本文を省略するか（未指定=true）．個別の bodyDisplay が優先． */
+  cardTruncate?: boolean;
+  /** 個別上書き: 'full'=全文 / 'truncated'=省略 / undefined=全体設定に従う． */
+  bodyDisplay?: 'full' | 'truncated';
   collapsed?: boolean;
   /** (#7) source serials for a merged card → shown as "← 003,005". */
   mergedFrom?: number[];
@@ -99,6 +103,13 @@ function CardNodeImpl({ id, data, selected }: NodeProps<CardNodeData>) {
 
   const maxChars = data.maxChars ?? 90;
   const isCollapsed = data.collapsed === true && !editing;
+  // 省略するか: 個別 bodyDisplay が最優先 → 全体設定 cardTruncate → 既定 true(省略).
+  const shouldTruncate =
+    data.bodyDisplay === 'full'
+      ? false
+      : data.bodyDisplay === 'truncated'
+        ? true
+        : data.cardTruncate !== false;
 
   return (
     <div
@@ -177,7 +188,7 @@ function CardNodeImpl({ id, data, selected }: NodeProps<CardNodeData>) {
           onDoubleClick={handleDoubleClick}
           title="ダブルクリックで編集"
         >
-          {truncate(data.body, maxChars)}
+          {shouldTruncate ? truncate(data.body, maxChars) : data.body}
         </div>
       )}
       {!isCollapsed && <div className="card-node-footer">{data.participantCode}</div>}

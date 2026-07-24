@@ -64,6 +64,12 @@ export interface Card {
   displayStyle?: DisplayStyle;
   /** When true, the card is rendered as ID-only (body hidden) on the canvas. */
   collapsed?: boolean;
+  /** Per-card override for body truncation on the canvas.
+   *  - 'full': 本文を省略せず全文表示（全体設定に関わらず）
+   *  - 'truncated': 本文を cardMaxChars で省略（全体設定に関わらず）
+   *  - undefined: 全体設定 DisplaySettings.cardTruncate に従う
+   *  collapsed=true（ID のみ）が最優先で，本フィールドは非 collapsed 時のみ効く． */
+  bodyDisplay?: 'full' | 'truncated';
   /** (#7) For merged cards: the serial numbers of the source cards this card
    * was created from.  Shown as a provenance sub-label (e.g. "← 003,005").
    * Absent for normal (non-merged) cards. */
@@ -477,6 +483,10 @@ export interface ProjectData {
 
 export interface DisplaySettings {
   cardMaxChars?: number;
+  /** カード本文をキャンバス上で省略（cardMaxChars で「…」切り詰め）するか．
+   *  未指定は true 扱い（従来どおり省略）．false で全カード全文表示（省略 OFF）．
+   *  個別カードの Card.bodyDisplay が優先する． */
+  cardTruncate?: boolean;
   cardWrapWidth?: number;
   cardFontSize?: number;
   groupFontSize?: number;

@@ -10,6 +10,7 @@ interface Props {
 
 const DEFAULTS = {
   cardMaxChars: 90,
+  cardTruncate: true,
   cardWrapWidth: 220,
   cardFontSize: 12,
   groupFontSize: 12,
@@ -25,6 +26,9 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
   const current = project?.metadata.displaySettings;
   const [cardMaxChars, setCardMaxChars] = useState<number>(
     current?.cardMaxChars ?? DEFAULTS.cardMaxChars
+  );
+  const [cardTruncate, setCardTruncate] = useState<boolean>(
+    current?.cardTruncate ?? DEFAULTS.cardTruncate
   );
   const [cardWrapWidth, setCardWrapWidth] = useState<number>(
     current?.cardWrapWidth ?? DEFAULTS.cardWrapWidth
@@ -51,6 +55,7 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     setCardMaxChars(current?.cardMaxChars ?? DEFAULTS.cardMaxChars);
+    setCardTruncate(current?.cardTruncate ?? DEFAULTS.cardTruncate);
     setCardWrapWidth(current?.cardWrapWidth ?? DEFAULTS.cardWrapWidth);
     setCardFontSize(current?.cardFontSize ?? DEFAULTS.cardFontSize);
     setGroupFontSize(current?.groupFontSize ?? DEFAULTS.groupFontSize);
@@ -65,6 +70,7 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
   const handleSave = () => {
     const next: DisplaySettings = {
       cardMaxChars,
+      cardTruncate,
       cardWrapWidth,
       cardFontSize,
       groupFontSize,
@@ -99,8 +105,23 @@ export function DisplaySettingsDialog({ open, onClose }: Props) {
               min={20}
               max={500}
               value={cardMaxChars}
+              disabled={!cardTruncate}
               onChange={(e) => setCardMaxChars(Number(e.target.value))}
             />
+          </div>
+          <div className="form-row">
+            <label htmlFor="cardTruncate">本文の省略</label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                id="cardTruncate"
+                type="checkbox"
+                checked={cardTruncate}
+                onChange={(e) => setCardTruncate(e.target.checked)}
+              />
+              <span className="muted small">
+                文字数上限で「…」省略する（標準: ON）．OFF で全カード全文表示．個別カードの設定が優先．
+              </span>
+            </label>
           </div>
           <div className="form-row">
             <label>カード幅 (px)</label>

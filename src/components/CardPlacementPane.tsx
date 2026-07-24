@@ -258,7 +258,11 @@ function PlacementSection({
             >
               <div className="placement-card-code">{c.code}</div>
               <div className="placement-card-body">
-                {c.body ? c.body.slice(0, 80) : '(本文なし)'}
+                {c.body
+                  ? project?.metadata.displaySettings?.cardTruncate === false
+                    ? c.body
+                    : c.body.slice(0, 80)
+                  : '(本文なし)'}
               </div>
               <div className="placement-card-actions">
                 <button

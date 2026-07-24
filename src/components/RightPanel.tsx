@@ -22,6 +22,7 @@ import {
   makeRemoveGtaCodeApplicationCommand,
   makeRenameGroupCommand,
   makeSplitCardCommand,
+  makeSetCardBodyDisplayCommand,
 } from '../stores/commands.js';
 import { newId } from '../domain/ids.js';
 import type { MemoEntry } from '@shared/types/domain';
@@ -420,6 +421,29 @@ function CardRightPanel() {
           onBlur={commitBody}
           rows={6}
         />
+        <label className="block-label">本文の表示（このカード）</label>
+        <select
+          value={card.bodyDisplay ?? 'default'}
+          onChange={(e) => {
+            if (!card) return;
+            const v = e.target.value;
+            const next = v === 'full' ? 'full' : v === 'truncated' ? 'truncated' : undefined;
+            applyCommand(
+              makeSetCardBodyDisplayCommand(
+                card.id,
+                next,
+                card.bodyDisplay,
+                new Date().toISOString(),
+                card.updatedAt
+              )
+            );
+          }}
+          style={{ width: '100%' }}
+        >
+          <option value="default">既定（表示設定に従う）</option>
+          <option value="full">全文表示（省略しない）</option>
+          <option value="truncated">省略表示（…で切り詰め）</option>
+        </select>
         <label className="block-label">メモ (ログ)</label>
         <MemoLogEditor
           entries={card.memoLog ?? []}

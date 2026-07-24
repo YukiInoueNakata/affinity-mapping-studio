@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  applyDisplayOrder,
   buildCard,
   buildMergedCard,
   buildSplitCards,
@@ -506,5 +507,56 @@ describe('buildUnmergeCard', () => {
     expect(
       canUnmergeCard({ ...data.cards[0], mergedFrom: [1, 2] })
     ).toBe(true); // legacy
+  });
+});
+
+describe('applyDisplayOrder（並び替えの共有・永続化ロジック）', () => {
+  const mk = (id: string) => ({ id });
+
+  it('savedOrder が無ければ元の順序をそのまま返す', () => {
+    const cards = [mk('a'), mk('b'), mk('c')];
+    expect(applyDisplayOrder(cards, null)).toEqual(cards);
+    expect(applyDisplayOrder(cards, [])).toEqual(cards);
+  });
+
+  it('savedOrder の順に並べ替える', () => {
+    const cards = [mk('a'), mk('b'), mk('c')];
+    expect(applyDisplayOrder(cards, ['c', 'a', 'b']).map((c) => c.id)).toEqual([
+      'c',
+      'a',
+      'b',
+    ]);
+  });
+
+  it('savedOrder に無い新規カードは自然順で末尾に付く', () => {
+    const cards = [mk('a'), mk('b'), mk('new')];
+    expect(applyDisplayOrder(cards, ['b', 'a']).map((c) => c.id)).toEqual([
+      'b',
+      'a',
+      'new',
+    ]);
+  });
+
+  it('カードを 1 枚抜いても（キャンバスへ移動）残りの並びは保持される＝リセットしない', () => {
+    // b をキャンバスへ出した後（cards から b が消える）でも a,c の順は保存順のまま．
+    const saved = ['c', 'b', 'a'];
+    const afterMove = [mk('a'), mk('c')];
+    expect(applyDisplayOrder(afterMove, saved).map((c) => c.id)).toEqual(['c', 'a']);
+  });
+
+  it('savedOrder にあるが現存しない id は無視する', () => {
+    const cards = [mk('a'), mk('b')];
+    expect(applyDisplayOrder(cards, ['ghost', 'b', 'a']).map((c) => c.id)).toEqual([
+      'b',
+      'a',
+    ]);
+  });
+
+  it('savedOrder 内の重複 id は 1 回だけ反映する', () => {
+    const cards = [mk('a'), mk('b')];
+    expect(applyDisplayOrder(cards, ['a', 'a', 'b']).map((c) => c.id)).toEqual([
+      'a',
+      'b',
+    ]);
   });
 });

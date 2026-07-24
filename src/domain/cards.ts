@@ -27,6 +27,33 @@ export function getCardsByPlacement(
   return data.cards.filter((c) => effectivePlacement(c) === placement);
 }
 
+/** 保存済みの表示並び順（カード id 配列）を現在のカード配列に適用する．
+ *  - savedOrder に載る id の順で先頭に並べ，
+ *  - savedOrder に無いカード（新規追加など）は元の自然順で末尾に足す，
+ *  - savedOrder にあるが cards に無い id（削除・別 placement へ移動）は無視する．
+ *  この設計により，未分類から 1 枚キャンバスへ出しても残りの並びはリセットされない．
+ *  純粋関数（副作用なし）— 「並び替え（シャッフル）」の共有・永続化の中核ロジック． */
+export function applyDisplayOrder<T extends { id: string }>(
+  cards: T[],
+  savedOrder: readonly string[] | undefined | null
+): T[] {
+  if (!savedOrder || savedOrder.length === 0) return cards;
+  const map = new Map(cards.map((c) => [c.id, c]));
+  const out: T[] = [];
+  const used = new Set<string>();
+  for (const id of savedOrder) {
+    const c = map.get(id);
+    if (c && !used.has(id)) {
+      out.push(c);
+      used.add(id);
+    }
+  }
+  for (const c of cards) {
+    if (!used.has(c.id)) out.push(c);
+  }
+  return out;
+}
+
 export function nextCardSerial(data: ProjectData, participantId: string): number {
   let max = 0;
   for (const c of data.cards) {

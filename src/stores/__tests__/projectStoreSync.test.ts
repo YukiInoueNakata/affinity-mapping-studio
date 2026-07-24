@@ -248,6 +248,23 @@ describe('projectStore + YjsSyncBridge — metadata mirror (Codex-W2)', () => {
     expect(mirrored?.cardFontScale).toBe(1.25);
   });
 
+  it('setPlacementOrder（未分類シャッフル）が Y.Doc の metadata にミラーされる＝相手へ同期', () => {
+    const store = useProjectStore.getState();
+    store.loadProject(null, freshProject());
+    const bridge = new YjsSyncBridge();
+    store.attachSyncBridge(bridge);
+
+    useProjectStore.getState().setPlacementOrder('unclassified', ['c3', 'c1', 'c2']);
+
+    expect(
+      useProjectStore.getState().project?.metadata.placementOrder?.unclassified
+    ).toEqual(['c3', 'c1', 'c2']);
+    const mirrored = bridge.doc.getMap('metadata').get('placementOrder') as {
+      unclassified?: string[];
+    };
+    expect(mirrored?.unclassified).toEqual(['c3', 'c1', 'c2']);
+  });
+
   it('リモートの metadata 変更が store.project へ反映される', () => {
     const store = useProjectStore.getState();
     store.loadProject(null, freshProject('local'));

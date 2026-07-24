@@ -497,6 +497,15 @@ export interface ProjectMetadata {
   updated_at: ISODateString;
   description: string;
   displaySettings?: DisplaySettings;
+  /** 未分類 / 分類留保リストの表示並び順（カード id の配列）．
+   *  「並び替え（シャッフル）」を共同編集で共有・永続化するために metadata に持つ．
+   *  リストに無い id は無視し，配列に無いカードは末尾に自然順で並べる（新規カード追加や
+   *  キャンバスへの移動でリセットしない）．metadata なので汎用ミラーで同期され，
+   *  サーバー側スキーマ変更は不要． */
+  placementOrder?: {
+    unclassified?: string[];
+    pending?: string[];
+  };
 }
 
 // ---- Final KJ diagram (schema v9) ----

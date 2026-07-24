@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import {
+  applyDisplayOrder,
   effectivePlacement,
   getCardsByPlacement,
   nextCardPositionForParticipant,
@@ -58,9 +59,13 @@ function PlacementSection({
   const applyCommand = useProjectStore((s) => s.applyCommand);
   const selectCard = useProjectStore((s) => s.selectCard);
   const selectedCardId = useProjectStore((s) => s.selectedCardId);
+  const setPlacementOrder = useProjectStore((s) => s.setPlacementOrder);
   const [collapsed, setCollapsed] = useState(false);
-  const [shuffleOrder, setShuffleOrder] = useState<string[] | null>(null);
   const [filter, setFilter] = useState<string>('');
+  // 並び替え順は metadata に永続化し，共同編集で共有する（ローカル state ではない）．
+  // placement は 'unclassified' | 'pending' のセクションでのみ使う（'canvas' は無い）．
+  const savedOrder =
+    placement === 'canvas' ? undefined : project?.metadata.placementOrder?.[placement];
   const kbScroll = useKeyboardScroll();
   // 2026-06-02: ジャンプで対象カードまでスクロールするための ref マップ．
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -92,25 +97,20 @@ function PlacementSection({
     );
   }, [cards, filter]);
 
-  // Apply the local shuffle order if it covers exactly the current card ids.
-  // When the underlying card set changes (new add / remove) we drop the order
-  // back to natural ordering so the new card appears.
-  const orderedCards = useMemo(() => {
-    if (!shuffleOrder) return filteredCards;
-    const set = new Set(filteredCards.map((c) => c.id));
-    const idsMatch =
-      shuffleOrder.length === filteredCards.length &&
-      shuffleOrder.every((id) => set.has(id));
-    if (!idsMatch) return filteredCards;
-    const map = new Map(filteredCards.map((c) => [c.id, c]));
-    return shuffleOrder
-      .map((id) => map.get(id))
-      .filter((c): c is Card => !!c);
-  }, [filteredCards, shuffleOrder]);
+  // 保存済みの並び替え順を適用する．保存順に載っているカードを先頭に，
+  // 保存順に無いカード（新規追加など）は自然順で末尾に置く．削除・キャンバスへの
+  // 移動でリストから抜けたカードは自然に落ちるだけで，残りの順序は保持される
+  // （＝カードを 1 枚キャンバスへ出しても並びがリセットされない）．
+  const orderedCards = useMemo(
+    () => applyDisplayOrder(filteredCards, savedOrder),
+    [filteredCards, savedOrder]
+  );
 
   const handleShuffle = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setShuffleOrder(shuffleIds(cards.map((c) => c.id)));
+    if (placement === 'canvas') return;
+    // 並び順を metadata に保存 → 汎用ミラーで接続相手にも同期される．
+    setPlacementOrder(placement, shuffleIds(cards.map((c) => c.id)));
   };
 
   if (!project) return null;
@@ -199,7 +199,7 @@ function PlacementSection({
             type="button"
             className="segment-action-btn"
             onClick={handleShuffle}
-            title="表示順をランダムに並び替え (データは変わりません)"
+            title="表示順をランダムに並び替え（並び順は保存され，共同編集の相手にも共有されます）"
             style={{ marginLeft: 'auto' }}
           >
             並び替え

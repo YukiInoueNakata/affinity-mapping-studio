@@ -122,6 +122,8 @@ export interface ProjectStoreState {
 
   setProjectName(name: string): void;
   setDisplaySettings(settings: DisplaySettings | undefined): void;
+  /** 未分類 / 分類留保リストの表示並び順（カード id 配列）を保存・同期する． */
+  setPlacementOrder(placement: 'unclassified' | 'pending', ids: string[]): void;
 
   /** Append a snapshot to project.snapshots (not via Command — snapshots are
    * file-state, not undoable edit history). */
@@ -450,6 +452,18 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     if (!project) return;
     // Codex-W2: displaySettings の変更も他クライアントへミラーする．
     const metadata = { ...project.metadata, displaySettings: settings };
+    set({ project: { ...project, metadata }, isDirty: true });
+    mirrorToBridge(project.data, metadata);
+  },
+
+  setPlacementOrder(placement, ids) {
+    const { project } = get();
+    if (!project) return;
+    // 「並び替え（シャッフル）」の表示順を metadata に保存し，共同編集で共有・永続化する．
+    // displaySettings と同じく metadata 経由の汎用ミラーで同期される（サーバー変更不要）．
+    const prev = project.metadata.placementOrder ?? {};
+    const placementOrder = { ...prev, [placement]: ids };
+    const metadata = { ...project.metadata, placementOrder };
     set({ project: { ...project, metadata }, isDirty: true });
     mirrorToBridge(project.data, metadata);
   },

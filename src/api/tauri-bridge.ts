@@ -226,6 +226,11 @@ const api: IpcApi = {
     return { filePath, fileName, text, sourceFormat: fmt };
   },
 
+  quitApp: async (): Promise<void> => {
+    // Rust 側で保存の完了待ち → app.exit(0) → (固まった場合は) ウォッチドッグ．
+    await invoke('quit_app');
+  },
+
   openSourceView: async (): Promise<void> => {
     const label = 'source';
     const existing = await WebviewWindow.getByLabel(label);

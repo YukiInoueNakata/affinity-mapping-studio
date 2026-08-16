@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useProjectStore } from './stores/projectStore.js';
+import { logEvent } from './utils/errorBuffer.js';
 import { LeftPanel } from './components/LeftPanel.js';
 import { SourceViewer } from './components/SourceViewer.js';
 import { CanvasView } from './components/CanvasView.js';
@@ -512,8 +513,50 @@ export function App() {
     }
   }, [project, markSaved]);
 
-  // 2026-07 レビュー A4: ウィンドウを閉じるときの未保存ガード (Alt+F4 /
-  // タスクバー閉じる)．新規/開く/接続の confirm と同じ運用を終了時にも適用する．
+  // ウィンドウを閉じるときの未保存ガード (X / Alt+F4 / タスクバー閉じる)．
+  //
+  // 2026-08-16 調査 (univ・metis で「閉じられない」プロセスが放置されていた件):
+  //  - Tauri は close-requested に JS リスナーが居ると OS からの close を必ず
+  //    prevent する (tauri manager/window.rs)．つまりガードを 1 つ登録した時点で，
+  //    ウィンドウを閉じられるのは JS だけになる．
+  //  - その JS 側の閉じ手段だった `getCurrentWindow().destroy()` は capability に
+  //    `core:window:allow-destroy` が無く ACL に拒否され続けていた．例外は
+  //    catch で握り潰していたので，X を押しても完全に無反応だった．
+  //    未保存の有無にも共同編集接続の有無にも関係なく発生する (未保存ゼロの
+  //    新規起動でも閉じないことを実機で確認)．
+  //  - 対策: (1) 確認 UI は OS ダイアログではなくアプリ内モーダルにする
+  //    (ネイティブダイアログが出ない環境でも詰まない)．(2) 実際の終了は ACL に
+  //    依存しない自作コマンド quit_app へ一本化する．(3) 失敗しても黙って
+  //    詰まらせず，理由を画面に出す．
+  const [closePrompt, setClosePrompt] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const closingRef = useRef(false);
+
+  const quitNow = useCallback(async () => {
+    closingRef.current = true;
+    logEvent('close-guard: quit requested');
+    try {
+      await window.api.quitApp();
+      return;
+    } catch (e) {
+      console.error('[close-guard] quit_app failed:', e);
+    }
+    // 保険: quit_app が使えない場合は destroy() を試す (capability を追加済み)．
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().destroy();
+      return;
+    } catch (e) {
+      console.error('[close-guard] destroy() also failed:', e);
+    }
+    // どちらも駄目なら「無反応で閉じない」ではなく理由を出す．
+    closingRef.current = false;
+    setCloseError(
+      'アプリを終了できませんでした。保存だけ済ませてから、タスクマネージャで終了してください。'
+    );
+    setClosePrompt(true);
+  }, []);
+
   useEffect(() => {
     if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
     let unlisten: (() => void) | null = null;
@@ -521,45 +564,35 @@ export function App() {
     void (async () => {
       try {
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const un = await getCurrentWindow().onCloseRequested(async (event) => {
-          const dirty = useProjectStore.getState().isDirty;
-          if (!dirty) return; // 未保存が無ければそのまま閉じる
-          // 2026-07-14 レビュー rank10: 同期 window.confirm は onCloseRequested
-          // (ユーザージェスチャ外) では WebView2 で表示されず false を返し，
-          // preventDefault で窓が閉じなくなる．非同期の Tauri ダイアログを await する．
-          // await の前に同期的に preventDefault してから確認する．
+        // ハンドラは同期に保つ (await を挟むと wrapper 側の destroy() 判定と
+        // 競合する)．常に prevent し，終了は自分の経路で行う．
+        const un = await getCurrentWindow().onCloseRequested((event) => {
           event.preventDefault();
-          let ok = false;
-          try {
-            const { ask } = await import('@tauri-apps/plugin-dialog');
-            ok = await ask('未保存の変更があります。保存せずに終了しますか？', {
-              title: '終了確認',
-              kind: 'warning',
-            });
-          } catch (e) {
-            console.warn('[close-guard] dialog failed, keeping window open:', e);
-            return;
-          }
-          if (ok) {
-            // 再度 onCloseRequested を発火させないよう destroy で強制的に閉じる
-            try {
-              await getCurrentWindow().destroy();
-            } catch {
-              /* ignore */
-            }
+          if (closingRef.current) return;
+          if (useProjectStore.getState().isDirty) {
+            setCloseError(null);
+            setClosePrompt(true);
+          } else {
+            void quitNow();
           }
         });
         if (disposed) un();
         else unlisten = un;
       } catch (e) {
-        console.warn('[close-guard] register failed:', e);
+        console.error('[close-guard] register failed:', e);
       }
     })();
     return () => {
       disposed = true;
       if (unlisten) unlisten();
     };
-  }, []);
+  }, [quitNow]);
+
+  const handleSaveAndQuit = useCallback(async () => {
+    const ok = await doSave(false);
+    // 保存ダイアログをキャンセルした / 保存に失敗した場合は閉じない．
+    if (ok) void quitNow();
+  }, [doSave, quitNow]);
 
   useEffect(() => {
     const ev = (window as unknown as {
@@ -2146,6 +2179,39 @@ export function App() {
         onClose={() => setDisplaySettingsOpen(false)}
       />
       <AuditExportDialog open={auditOpen} onClose={() => setAuditOpen(false)} />
+      {closePrompt && (
+        <div className="modal-backdrop">
+          <div className="modal" style={{ width: 520 }}>
+            <header className="modal-header">
+              <h2>終了確認</h2>
+            </header>
+            <div className="modal-body">
+              {closeError ? (
+                <p className="status-error">{closeError}</p>
+              ) : (
+                <p>
+                  保存していない変更があります。保存してから終了しますか？
+                </p>
+              )}
+            </div>
+            <footer className="modal-footer">
+              <button type="button" onClick={() => setClosePrompt(false)}>
+                キャンセル
+              </button>
+              <button type="button" onClick={() => void quitNow()}>
+                保存せずに終了
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void handleSaveAndQuit()}
+              >
+                保存して終了
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
       <TagEditorDialog open={tagEditorOpen} onClose={() => setTagEditorOpen(false)} />
       <VersionHistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />

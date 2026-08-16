@@ -11,8 +11,29 @@ const buffer: Array<{ at: string; kind: string; message: string; stack?: string 
 let installed = false;
 
 function record(kind: string, message: string, stack?: string) {
-  buffer.push({ at: new Date().toISOString(), kind, message, stack });
+  const at = new Date().toISOString();
+  buffer.push({ at, kind, message, stack });
   if (buffer.length > MAX) buffer.shift();
+  persist(`${at} [${kind}] ${message}`);
+}
+
+// 2026-08-16: メモリ内 100 件だけでは，閉じられないまま放置されたプロセスから
+// 事後に何も取り出せなかった (窓が破棄された引き金すら復元できなかった)．
+// ディスクにも 1 行落とす．失敗しても握り潰す (ここで console.error を呼ぶと
+// 自分の hook を再帰的に叩くため，通知は行わない)．
+function persist(line: string) {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+  void import('@tauri-apps/api/core')
+    .then(({ invoke }) => invoke('append_log', { line }))
+    .catch(() => {
+      /* ignore */
+    });
+}
+
+/** 終了経路など，エラー以外の重要イベントもログに残す． */
+export function logEvent(message: string) {
+  const at = new Date().toISOString();
+  persist(`${at} [event] ${message}`);
 }
 
 export function installErrorBuffer() {

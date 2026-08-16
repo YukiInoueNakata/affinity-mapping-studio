@@ -40,6 +40,31 @@ static WRITE_LOCK: Mutex<()> = Mutex::new(());
 /// tmp ファイル名の一意化カウンタ (直列化に加えた防御第 2 層)．
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// 保存が走っていない状態になるまで待つ (最大 `timeout`)．
+///
+/// 2026-08-16: 終了経路 (quit_app / RunEvent::Exit) はプロセスを強制終了させる
+/// ため，書込み中に割り込むと保存内容を取りこぼす．本体 .kjproj は
+/// tmp → fsync → rename の atomic 書込みなので壊れはしないが，「終了直前の保存が
+/// 無かったことになる」のは避けたいので，ロックが空くまで待ってから落とす．
+/// 待ちきれなかった場合は false を返す (呼び出し側は続行する = 固まらせない)．
+pub fn wait_for_idle_write(timeout: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match WRITE_LOCK.try_lock() {
+            // ロックが取れた = 保存は走っていない．すぐ解放して戻る．
+            Ok(_) => return true,
+            // poisoned = 直前の保存スレッドが panic した．待っても意味が無い．
+            Err(std::sync::TryLockError::Poisoned(_)) => return true,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if std::time::Instant::now() >= deadline {
+                    return false;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+}
+
 /// ZIP エントリ 1 件あたりの展開サイズ上限 (zip-bomb / 破損ファイル対策)．
 const MAX_ZIP_ENTRY_BYTES: u64 = 200 * 1024 * 1024; // 200 MB
 

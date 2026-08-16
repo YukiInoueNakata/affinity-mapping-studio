@@ -45,6 +45,15 @@ export interface IpcApi {
   saveProjectAs(project: ProjectFile): Promise<SaveProjectResult | null>;
   readTextFile(): Promise<ReadTextFileResult | null>;
   openSourceView(): Promise<void>;
+  /**
+   * アプリを終了する．
+   *
+   * 2026-08-16: ウィンドウを閉じる手段を `getCurrentWindow().destroy()` から
+   * Rust の `quit_app` へ一本化した．destroy() は capability (ACL) 次第で
+   * 拒否され，しかも Tauri は JS リスナーがある限り OS からの close を必ず
+   * prevent するため，拒否 = 二度と閉じられない窓になっていた．
+   */
+  quitApp(): Promise<void>;
 }
 
 declare global {

@@ -278,9 +278,15 @@ export function ImportWizard({ open, onClose }: Props) {
     setFile(r);
     if (r.rows && r.rows.length > 0) {
       setParseMode('tabular');
+      setHeaderRowIdx(0);
+      setDataStartIdx(1);
     } else {
       // 2026-06-02: テキスト系のデフォルトを「行で区切り」に
       setParseMode('line');
+      // テキストに見出しの行は無いので「ヘッダー行: なし」から始める．
+      // 0 のままだと 1 行目が見出し扱いになり，黙ってカードにならない．
+      setHeaderRowIdx(null);
+      setDataStartIdx(0);
     }
     // Reset wizard navigation so STEPS-array shape changes don't put us
     // on a now-missing step (e.g. switching from txt to xlsx removes parse)

@@ -42,6 +42,13 @@ export function ExportDialog({ open, onClose }: Props) {
   const [busy, setBusy] = useState<boolean>(false);
   const fontTagRef = useRef<HTMLStyleElement | null>(null);
 
+  // The dialog stays mounted while closed, so a preview captured earlier
+  // (possibly from another project) would reappear on the next open and
+  // "で保存" would write that stale image. Drop it whenever the dialog closes.
+  useEffect(() => {
+    if (!open) setPreview(null);
+  }, [open]);
+
   // Inject a temporary <style> that overrides font-size for the export. Reset
   // when the dialog closes or fontSizeOverride is null.
   useEffect(() => {

@@ -269,6 +269,18 @@ export function App() {
       // ignore
     }
   }, [showDebugOverlay]);
+  // 配布版ではツールバーに debug ボタンを出さない（開発版と，既に ON の時だけ出す）．
+  // 配布版でトラブルシュートが要るときは Ctrl+Alt+Shift+D で切り替える．
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyD') {
+        e.preventDefault();
+        setShowDebugOverlay((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const [uiScale, setUiScale] = useState<number>(() => {
     try {
@@ -1503,15 +1515,17 @@ export function App() {
                     </button>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowDebugOverlay((v) => !v)}
-                  title="同期デバッグオーバーレイ（画面右下に store 状態表示）"
-                  style={{ fontSize: 10, marginLeft: 6, padding: '2px 8px' }}
-                  className={showDebugOverlay ? 'rb-btn-active' : ''}
-                >
-                  debug {showDebugOverlay ? 'ON' : 'OFF'}
-                </button>
+                {(import.meta.env.DEV || showDebugOverlay) && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDebugOverlay((v) => !v)}
+                    title="同期デバッグオーバーレイ（画面右下に store 状態表示．Ctrl+Alt+Shift+D でも切り替え）"
+                    style={{ fontSize: 10, marginLeft: 6, padding: '2px 8px' }}
+                    className={showDebugOverlay ? 'rb-btn-active' : ''}
+                  >
+                    debug {showDebugOverlay ? 'ON' : 'OFF'}
+                  </button>
+                )}
               </RibbonSection>
               <RibbonSection label="連携">
                 <button

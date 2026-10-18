@@ -30,5 +30,5 @@ Please report bugs or ask questions in [Issues](https://github.com/YukiInoueNaka
 
 ## ライセンス / License
 
-[LICENSE.txt](LICENSE.txt) を参照してください．
-See [LICENSE.txt](LICENSE.txt).
+[Apache License 2.0](LICENSE) です．誰でも無償で使え，改変・再配布もできます（条件は LICENSE と [NOTICE](NOTICE) を参照）．
+Licensed under the [Apache License 2.0](LICENSE): free to use, modify, and redistribute under its terms (see also [NOTICE](NOTICE)).

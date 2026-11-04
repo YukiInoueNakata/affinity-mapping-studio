@@ -77,10 +77,12 @@ function sampleData(): ProjectData {
 }
 
 describe('YjsSyncBridge — schema constants', () => {
-  it('TABLE_NAMES covers all 22 ProjectData tables', () => {
-    expect(TABLE_NAMES.length).toBe(22);
+  it('TABLE_NAMES covers all 23 ProjectData tables', () => {
+    expect(TABLE_NAMES.length).toBe(23);
     const empty = emptyData();
     for (const t of TABLE_NAMES) {
+      // level_positions は省略可 (旧データに無い)．
+      if (t === 'level_positions') continue;
       expect(empty).toHaveProperty(t);
     }
   });
@@ -470,8 +472,18 @@ describe('YjsSyncBridge — applyDiff (incremental mirror)', () => {
   it('does NOT bloat the doc: many single-field edits stay tiny vs re-seed', () => {
     // Anti-regression for the giro2026 incident: the old mirror re-seeded the
     // whole doc each edit, tombstoning everything and growing without bound.
-    const seedBridge = new YjsSyncBridge();
-    const diffBridge = new YjsSyncBridge();
+    // clientID は既定でランダムで，その値を書く varint の長さ (1〜5 バイト) で
+    // 文書の大きさが変わる．2 つの doc が別々の乱数を引くと，seed 側だけ小さい
+    // ID になった回 (約 1/16) に比が 5 倍を切って落ちていた (2026-11-04 調査．
+    // 例: seed 5581 / diff 1134)．同じ固定の ID にして比を決定的にする．
+    // 5 バイトの varint になる大きさ (>= 2^28) にして，実運用の大半と同じ条件で測る．
+    const FIXED_CLIENT_ID = 2 ** 31 + 12345;
+    const seedDoc = new Y.Doc();
+    seedDoc.clientID = FIXED_CLIENT_ID;
+    const diffDoc = new Y.Doc();
+    diffDoc.clientID = FIXED_CLIENT_ID;
+    const seedBridge = new YjsSyncBridge(seedDoc);
+    const diffBridge = new YjsSyncBridge(diffDoc);
     const base = sampleData();
     seedBridge.seedFromProjectData(base);
     diffBridge.applyDiff(base);
@@ -699,5 +711,44 @@ describe('YjsSyncBridge — helper methods', () => {
     expect(bridge.deleteRecordById('cards', 'c1')).toBe(true);
     expect(bridge.toProjectData().cards.length).toBe(0);
     expect(bridge.deleteRecordById('cards', 'c1')).toBe(false);
+  });
+});
+
+describe('YjsSyncBridge — level_positions (段のタブ・2026-11)', () => {
+  it('2 台が同じ id の行を同時に作っても，読むと 1 行・次の applyDiff で重複が消える', () => {
+    const base = sampleData();
+    const a = new YjsSyncBridge();
+    a.applyDiff(base);
+    const b = new YjsSyncBridge();
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc));
+    // サーバーの ensureEmptyTables と同じく，root の配列は先に 1 つだけ作っておく
+    // (クライアントどうしの tables.set 競合はサーバー側の対策の範囲)．
+    a.doc.getMap('tables').set('level_positions', new Y.Array());
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc, Y.encodeStateVector(b.doc)));
+
+    const row = (x: number) => ({
+      id: 'lv2-g1', level: 2, itemKind: 'group' as const, itemId: 'g1', x, y: 0,
+    });
+    a.applyDiff({ ...base, level_positions: [row(10)] });
+    b.applyDiff({ ...base, level_positions: [row(20)] });
+    Y.applyUpdate(b.doc, Y.encodeStateAsUpdate(a.doc, Y.encodeStateVector(b.doc)));
+    Y.applyUpdate(a.doc, Y.encodeStateAsUpdate(b.doc, Y.encodeStateVector(a.doc)));
+
+    const arr = a.doc.getMap('tables').get('level_positions') as Y.Array<unknown>;
+    expect(arr.length).toBe(2); // CRDT 上は 2 行
+    const readA = a.toProjectData().level_positions!;
+    const readB = b.toProjectData().level_positions!;
+    expect(readA).toHaveLength(1);
+    expect(readA).toEqual(readB); // 両端末で同じ行が残る
+
+    a.applyDiff(a.toProjectData());
+    expect(arr.length).toBe(1);
+  });
+
+  it('level_positions が無い (古い) doc は空として読み，空のときは root を作らない', () => {
+    const a = new YjsSyncBridge();
+    a.applyDiff(sampleData());
+    expect(a.toProjectData().level_positions).toEqual([]);
+    expect(a.doc.getMap('tables').has('level_positions')).toBe(false);
   });
 });

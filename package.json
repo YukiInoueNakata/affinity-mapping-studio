@@ -2,7 +2,7 @@
   "name": "affinity-mapping-studio",
   "private": true,
   "license": "Apache-2.0",
-  "version": "0.2.31",
+  "version": "0.2.32",
   "description": "Affinity Mapping Studio (Tauri 統合版).",
   "type": "module",
   "scripts": {
@@ -17,6 +17,9 @@
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-opener": "^2.7.2",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.1",
     "docx": "^9.6.1",
     "html-to-image": "^1.11.13",
     "jspdf": "^4.2.1",

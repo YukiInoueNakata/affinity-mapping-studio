@@ -39,6 +39,7 @@ export const TABLE_NAMES = [
   'gta_codes',
   'gta_code_applications',
   'gta_categories',
+  'level_positions',
 ] as const satisfies ReadonlyArray<keyof ProjectData>;
 
 export type TableName = (typeof TABLE_NAMES)[number];

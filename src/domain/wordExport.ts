@@ -117,14 +117,16 @@ export const SUGGESTED_REFERENCES: Array<{
     paperTypes: ['structure'],
   },
   {
+    // id は保存済みの設定が参照するので変えない．書誌は 2026-11-04 に DOI で確認
+    // (刊行は 2011．「2010年度報告論集」は報告論集の副題で刊行の年ではない)．
     id: 'tanaka2010',
     display:
-      '田中博晃 (2010) KJ法入門：質的データ分析法としてKJ法を行う前に. (KJ法 quick manual)',
+      '田中博晃 (2011). KJ法入門：質的データ分析法としてKJ法を行う前に. メソドロジー研究部会報告論集, 1, 17-29. https://doi.org/10.69194/methodologysig.1.02',
     paperTypes: ['enumeration', 'structure'],
   },
   {
     id: 'kawakita_hassouhou',
-    display: '川喜田二郎 (1967)『発想法――創造性開発のために』中公新書.',
+    display: '川喜田二郎 (1967). 発想法：創造性開発のために. 中央公論社 (中公新書 136).',
     paperTypes: ['enumeration', 'structure'],
   },
 ];

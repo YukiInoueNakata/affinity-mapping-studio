@@ -1,3 +1,4 @@
+import { confirmDialog } from '../services/confirmDialog.js';
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import { flattenGroupTree, getGroupLabel, getUngroupedCards, levelPrefix } from '../domain/groups.js';
@@ -45,7 +46,7 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [mergeFromId, setMergeFromId] = useState<string | null>(null);
 
-  const handleDeleteParticipant = (pid: string) => {
+  const handleDeleteParticipant = async (pid: string) => {
     if (!project) return;
     const p = project.data.participants.find((x) => x.id === pid);
     if (!p) return;
@@ -60,7 +61,7 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
       );
       return;
     }
-    if (!confirm(`参加者 "${p.code}" (${p.displayName}) を削除しますか?`)) return;
+    if (!(await confirmDialog(`参加者 "${p.code}" (${p.displayName}) を削除しますか?`))) return;
     applyCommand(makeDeleteParticipantCommand(p));
     setMenuParticipantId(null);
   };
@@ -70,7 +71,7 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
     setMenuParticipantId(null);
   };
 
-  const handleConfirmMerge = (toId: string) => {
+  const handleConfirmMerge = async (toId: string) => {
     if (!project || !mergeFromId) return;
     const fromP = project.data.participants.find((p) => p.id === mergeFromId);
     const toP = project.data.participants.find((p) => p.id === toId);
@@ -79,7 +80,7 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
       return;
     }
     const fromCardCount = project.data.cards.filter((c) => c.participantId === mergeFromId).length;
-    const ok = confirm(
+    const ok = (await confirmDialog(
       `参加者をマージします:\n\n` +
         `  ${fromP.code} (${fromP.displayName}) → ${toP.code} (${toP.displayName})\n\n` +
         `・${fromP.code} の ${fromCardCount} 枚のカードが ${toP.code} に統合されます\n` +
@@ -87,7 +88,7 @@ export function LeftPanel({ onOpenImport, onJumpTo }: Props) {
         `・${fromP.code} 参加者は削除されます\n` +
         `・Undo で元に戻せます\n\n` +
         `続行しますか?`
-    );
+    ));
     if (!ok) return;
     applyCommand(
       makeMergeParticipantsCommand(mergeFromId, toId, {

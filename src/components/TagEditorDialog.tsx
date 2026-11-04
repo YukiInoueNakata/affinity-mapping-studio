@@ -1,3 +1,4 @@
+import { confirmDialog } from '../services/confirmDialog.js';
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import { makeTagBulkEditCommand, type TagBulkEdit } from '../stores/commands.js';
@@ -114,8 +115,8 @@ export function TagEditorDialog({ open, onClose }: Props) {
     setMergeOpen(null);
   };
 
-  const handleDelete = (tag: string, count: number) => {
-    if (!confirm(`タグ「${tag}」を ${count} 枚のカードから削除しますか？ (Undo で復元可)`)) return;
+  const handleDelete = async (tag: string, count: number) => {
+    if (!(await confirmDialog(`タグ「${tag}」を ${count} 枚のカードから削除しますか？ (Undo で復元可)`))) return;
     const edits: TagBulkEdit[] = [];
     for (const c of project.data.cards) {
       const tags = c.tags;

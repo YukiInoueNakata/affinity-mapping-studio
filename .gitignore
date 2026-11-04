@@ -21,3 +21,9 @@ Thumbs.db
 # 内部・作業ログ系（public repo につき commit しない・グローバル規約）
 CLAUDE.md
 WORKLOG.md
+
+# 根拠の資料（書誌のページなど）はローカルだけに置く
+references/
+
+# Playwright MCP の作業ファイル
+.playwright-mcp/

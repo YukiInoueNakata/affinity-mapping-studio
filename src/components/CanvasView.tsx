@@ -1,3 +1,5 @@
+import { confirmDialog } from '../services/confirmDialog.js';
+import { useRegisterExportTarget, useRenderAll } from '../services/canvasExport.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
@@ -118,6 +120,8 @@ export function CanvasView() {
 
 function CanvasViewImpl() {
   const { screenToFlowPosition, fitView, setCenter } = useReactFlow();
+  useRegisterExportTarget();
+  const renderAll = useRenderAll();
 
   useEffect(() => {
     const handler = () => {
@@ -306,18 +310,18 @@ function CanvasViewImpl() {
   const onRestoreSnapshot = useCallback(async (s: SnapshotEntry) => {
     const when = new Date(s.ts).toLocaleString();
     if (
-      !window.confirm(
+      !(await confirmDialog(
         `この状態に復元します。\n` +
           `${when} / ${snapshotTriggerLabel(s.trigger)} / ` +
           `C${s.counts.cards} G${s.counts.groups} M${s.counts.memberships}`
-      )
+      ))
     )
       return;
     if (
-      !window.confirm(
+      !(await confirmDialog(
         '現在の状態は上書きされます（復元前の状態も自動で退避されます）。\n' +
           '全員が一旦切断され、再接続で復元後の状態になります。復元しますか？'
-      )
+      ))
     )
       return;
     setRestoreBusy(s.id);
@@ -578,7 +582,7 @@ function CanvasViewImpl() {
   );
 
   const onNodeDragStop = useCallback<NodeMouseHandler>(
-    (_e, node) => {
+    async (_e, node) => {
       draggingRef.current.delete(node.id);
       let to = { x: node.position.x, y: node.position.y };
       if (node.type === 'card') {
@@ -610,7 +614,7 @@ function CanvasViewImpl() {
             overrides.set(id, t);
           }
           // 対策1: 大量カードの一括移動は確認する．キャンセル時は視覚位置を元へ戻す．
-          if (!confirmBulkOperation(moves.length, '一括で移動')) {
+          if (!(await confirmBulkOperation(moves.length, '一括で移動'))) {
             const fromById = new Map(moves.map((m) => [m.cardId, m.from]));
             setNodes((curr) =>
               curr.map((n) => {
@@ -937,15 +941,15 @@ function CanvasViewImpl() {
   );
 
   const dissolveGroup = useCallback(
-    (groupId: string) => {
+    async (groupId: string) => {
       if (!project) return;
       const group = project.data.groups.find((g) => g.id === groupId);
       if (!group) return;
       if (
-        !confirm(
+        !(await confirmDialog(
           `グループ「${group.name}」を解除しますか？\n` +
             'メンバーカード/子グループはこのグループから外れ, グループ自体は削除されます (Undo で復元可)'
-        )
+        ))
       )
         return;
       const label =
@@ -1053,7 +1057,7 @@ function CanvasViewImpl() {
   // 新メンバーを含めて再フィットする．ツールバーの混在選択と右クリックメニューの
   // 両方から呼ぶ．
   const incorporateCardsIntoGroup = useCallback(
-    (targetGroupId: string, cardIds: string[]) => {
+    async (targetGroupId: string, cardIds: string[]) => {
       if (!project || cardIds.length === 0) return;
       const now = new Date().toISOString();
       const replaced: GroupMembership[] = [];
@@ -1066,7 +1070,7 @@ function CanvasViewImpl() {
       }
       if (added.length === 0) return;
       // 対策1: 大量カードのグループ編入 (メンバーシップ一括付替) は確認する．
-      if (!confirmBulkOperation(added.length, 'グループに編入')) return;
+      if (!(await confirmBulkOperation(added.length, 'グループに編入'))) return;
       const cardOverrides = new Map(
         cardIds
           .map((cid) => project.data.card_positions.find((p) => p.cardId === cid))
@@ -1273,11 +1277,11 @@ function CanvasViewImpl() {
   );
 
   const deleteCard = useCallback(
-    (cardId: string) => {
+    async (cardId: string) => {
       if (!project) return;
       const card = project.data.cards.find((c) => c.id === cardId);
       if (!card) return;
-      if (!confirm(`カード ${card.code} を削除しますか？ (Undo で復元できます)`)) return;
+      if (!(await confirmDialog(`カード ${card.code} を削除しますか？ (Undo で復元できます)`))) return;
       const links = project.data.card_source_links.filter((l) => l.cardId === cardId);
       const pos = project.data.card_positions.find((p) => p.cardId === cardId) ?? null;
       applyCommand(makeDeleteCardCommand(card, links, pos));
@@ -1438,7 +1442,7 @@ function CanvasViewImpl() {
         return g && g.parentGroupId === null;
       }));
 
-  const onMergeCards = useCallback(() => {
+  const onMergeCards = useCallback(async () => {
     if (!project) return;
     if (selectedCardIds.length < 2) return;
     const oldCards = project.data.cards.filter((c) => selectedCardIds.includes(c.id));
@@ -1452,7 +1456,7 @@ function CanvasViewImpl() {
       .sort((a, b) => a.code.localeCompare(b.code))
       .map((c) => c.code)
       .join(', ');
-    if (!confirm(`${oldCards.length} 枚のカード (${codes}) を 1 枚に結合しますか？\n(Undo で復元できます)`)) {
+    if (!(await confirmDialog(`${oldCards.length} 枚のカード (${codes}) を 1 枚に結合しますか？\n(Undo で復元できます)`))) {
       return;
     }
     try {
@@ -1480,7 +1484,7 @@ function CanvasViewImpl() {
       return ps.size === 1;
     })();
 
-  const onCreateGroup = useCallback(() => {
+  const onCreateGroup = useCallback(async () => {
     if (!project || selectedCardIds.length === 0) return;
     const now = new Date().toISOString();
 
@@ -1499,7 +1503,7 @@ function CanvasViewImpl() {
     }
 
     // 対策1: 大量カードを 1 グループにまとめる操作は誤爆リスクが高いので確認する．
-    if (!confirmBulkOperation(selectedCardIds.length, '1 つのグループにまとめ')) return;
+    if (!(await confirmBulkOperation(selectedCardIds.length, '1 つのグループにまとめ'))) return;
 
     // Default: create a new group from selected cards.
     const cardPositions = project.data.card_positions.filter((p) =>
@@ -1860,7 +1864,7 @@ function CanvasViewImpl() {
             elevateNodesOnSelect={false}
             /* Performance: only render nodes whose bounding box overlaps the
              * current viewport.  Big difference on 500+ card projects. */
-            onlyRenderVisibleElements
+            onlyRenderVisibleElements={!renderAll}
             nodesFocusable={false}
           >
             <Background />

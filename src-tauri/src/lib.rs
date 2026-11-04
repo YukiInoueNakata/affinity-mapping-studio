@@ -146,7 +146,23 @@ fn append_log<R: Runtime>(app: AppHandle<R>, line: String) -> Result<(), String>
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // tauri-plugin-dialog は起動時に window.confirm を async 関数へ差し替える．
+        // 返り値が Promise（常に真）になり，`if (!confirm(...)) return` が必ず素通りする
+        // （差し替え先のコマンドも 2.7 で無くなっていてダイアログも出ない）．
+        // プラグインの初期化スクリプトは登録順に走るので，dialog より先に本来の
+        // confirm を取っておき，src/main.tsx で戻す．
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("kj-native-confirm")
+                .js_init_script(
+                    "window.__kjNativeConfirm = window.confirm.bind(window);".to_string(),
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
+        // 自動更新 (GitHub Releases の latest.json を見る)・更新後の再起動・外部 URL を開く．
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             greet,
             analyze_docx,

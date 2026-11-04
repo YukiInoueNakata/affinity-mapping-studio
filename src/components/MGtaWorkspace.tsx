@@ -1,3 +1,4 @@
+import { confirmDialog } from '../services/confirmDialog.js';
 import { useEffect, useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import {
@@ -383,8 +384,8 @@ function ConceptWorksheet({ conceptId }: { conceptId: string }) {
     applyCommand(makeEditConceptCommand(concept.id, prev, next));
   };
 
-  const handleDelete = () => {
-    if (!confirm(`概念「${concept.name}」を削除しますか？ (Undo で復元できます)`)) return;
+  const handleDelete = async () => {
+    if (!(await confirmDialog(`概念「${concept.name}」を削除しますか？ (Undo で復元できます)`))) return;
     applyCommand(makeDeleteConceptCommand(concept, variations));
     selectConcept(null);
   };

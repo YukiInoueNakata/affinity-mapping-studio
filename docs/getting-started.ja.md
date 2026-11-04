@@ -57,11 +57,7 @@ English version: [getting-started.en.md](getting-started.en.md)
 
    ![インストール先（次へ）](images/getting-started/win-07b-setup.png)
 
-7. 途中で 2 回，質問が出ます．どちらも，ふつうは「はい」を押します．
-   - 「デスクトップにショートカットを作成しますか？」
-   - 「スタートメニュー（すべてのアプリ）に登録しますか？」
-
-   ![デスクトップのショートカット](images/getting-started/win-08a-desktop-shortcut.png)
+7. 途中で「スタートメニュー（すべてのアプリ）に登録しますか？」と聞かれます．ふつうは「はい」を押します．
 
    ![スタートメニューへの登録](images/getting-started/win-08b-start-menu-reg.png)
 
@@ -69,7 +65,7 @@ English version: [getting-started.en.md](getting-started.en.md)
 
    ![インストールの完了（次へ）](images/getting-started/win-09-setup-complete.png)
 
-9. 「完了」を押します．「Affinity Mapping Studio を実行」にチェックがあれば，そのまま起動します．
+9. 「完了」を押します．「Affinity Mapping Studio を実行」にチェックがあれば，そのまま起動します．「デスクトップショートカットを作成する」にチェックがあれば，デスクトップにショートカットができます．
 
    ![完了の画面](images/getting-started/win-09b-setup-finish.png)
 

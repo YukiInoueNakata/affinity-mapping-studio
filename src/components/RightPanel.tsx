@@ -1,3 +1,4 @@
+import { confirmDialog } from '../services/confirmDialog.js';
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import type { Label, TextRevisionFieldName } from '@shared/types/domain';
 import { useProjectStore } from '../stores/projectStore.js';
@@ -294,9 +295,9 @@ function CardRightPanel() {
     );
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!project || !card) return;
-    if (!confirm(`カード ${card.code} を削除しますか？ (Undo で復元できます)`)) return;
+    if (!(await confirmDialog(`カード ${card.code} を削除しますか？ (Undo で復元できます)`))) return;
     const allLinks = project.data.card_source_links.filter((l) => l.cardId === card.id);
     const pos = project.data.card_positions.find((p) => p.cardId === card.id) ?? null;
     applyCommand(makeDeleteCardCommand(card, allLinks, pos));
@@ -464,9 +465,9 @@ function CardRightPanel() {
               )
             );
           }}
-          onDelete={(entry) => {
+          onDelete={async (entry) => {
             if (!card) return;
-            if (!confirm(`このメモ (${entry.timestamp.slice(0, 16).replace('T', ' ')}) を削除しますか？`)) return;
+            if (!(await confirmDialog(`このメモ (${entry.timestamp.slice(0, 16).replace('T', ' ')}) を削除しますか？`))) return;
             applyCommand(
               makeDeleteCardMemoEntryCommand(
                 card.id,
@@ -794,12 +795,12 @@ function GroupRightPanel() {
     );
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!project || !group) return;
     if (
-      !confirm(
+      !(await confirmDialog(
         `グループ「${group.name}」を削除しますか？ メンバーカードは未グループ化に戻ります．(Undo で復元できます)`
-      )
+      ))
     )
       return;
     const labelToRemove: Label | null = label;
@@ -987,9 +988,9 @@ function RelationRightPanel() {
     );
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!relation) return;
-    if (!confirm(`この関係線を削除しますか？\n${sourceName} → ${targetName}`)) return;
+    if (!(await confirmDialog(`この関係線を削除しますか？\n${sourceName} → ${targetName}`))) return;
     applyCommand(makeDeleteRelationCommand(relation));
     selectRelation(null);
   };
@@ -1137,8 +1138,8 @@ function LabelTabs({ drafts, setDrafts, commitField, labelId }: LabelTabsProps) 
               )
             );
           }}
-          onDelete={(entry) => {
-            if (!confirm(`このメモを削除しますか？`)) return;
+          onDelete={async (entry) => {
+            if (!(await confirmDialog(`このメモを削除しますか？`))) return;
             applyCommand(
               makeDeleteLabelMemoEntryCommand(
                 label.id,

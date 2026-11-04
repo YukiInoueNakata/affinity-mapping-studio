@@ -1,3 +1,4 @@
+import { confirmDialog } from '../services/confirmDialog.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import {
@@ -548,11 +549,11 @@ export function SourceViewer() {
     setCardContext(null);
   }
 
-  function handleDeleteCard(cardId: string) {
+  async function handleDeleteCard(cardId: string) {
     if (!project) return;
     const card = project.data.cards.find((c) => c.id === cardId);
     if (!card) return;
-    if (!confirm(`カード ${card.code} を削除しますか？ (Undo で復元できます)`)) return;
+    if (!(await confirmDialog(`カード ${card.code} を削除しますか？ (Undo で復元できます)`))) return;
     const links = project.data.card_source_links.filter((l) => l.cardId === cardId);
     const pos = project.data.card_positions.find((p) => p.cardId === cardId) ?? null;
     applyCommand(makeDeleteCardCommand(card, links, pos));
@@ -570,7 +571,7 @@ export function SourceViewer() {
     setMergeBuffer([]);
   }
 
-  function handleConfirmMerge() {
+  async function handleConfirmMerge() {
     if (!project) return;
     if (mergeBuffer.length < 2) return;
     const oldCards = project.data.cards.filter((c) => mergeBuffer.includes(c.id));
@@ -585,9 +586,9 @@ export function SourceViewer() {
       .map((c) => c.code)
       .join(', ');
     if (
-      !confirm(
+      !(await confirmDialog(
         `${oldCards.length} 枚のカード (${codes}) を 1 枚に結合しますか？\n(Undo で復元できます)`
-      )
+      ))
     ) {
       return;
     }
@@ -672,12 +673,12 @@ export function SourceViewer() {
     });
   }
 
-  function deleteSelectedSegments() {
+  async function deleteSelectedSegments() {
     if (!project || checkedSegmentIds.size === 0) return;
     if (
-      !confirm(
+      !(await confirmDialog(
         `${checkedSegmentIds.size} 件のセグメントを削除しますか？ (Undo で復元できます)`
-      )
+      ))
     )
       return;
     const ids = Array.from(checkedSegmentIds);
@@ -691,7 +692,7 @@ export function SourceViewer() {
     setCheckedSegmentIds(new Set());
   }
 
-  function deleteFileSegments(fileName: string) {
+  async function deleteFileSegments(fileName: string) {
     if (!project) return;
     const data = project.data;
     const targets = data.source_segments.filter(
@@ -735,9 +736,9 @@ export function SourceViewer() {
         ? `\nこのファイル由来のセグメントを参照するカード ${cascadedCards.length} 枚も削除されます．`
         : '';
     if (
-      !confirm(
+      !(await confirmDialog(
         `ファイル「${fileName}」の ${targets.length} 件のセグメントをすべて削除しますか？${cardNote}${partNote}\n(Undo で復元できます)`
-      )
+      ))
     )
       return;
     const prev: Record<string, string | null> = {};
@@ -769,7 +770,7 @@ export function SourceViewer() {
     setSpeakerEditFor(null);
   }
 
-  function deleteSegment(segmentId: string) {
+  async function deleteSegment(segmentId: string) {
     if (!project) return;
     const linkedCardCount = project.data.card_source_links.filter(
       (l) => l.segmentId === segmentId
@@ -778,7 +779,7 @@ export function SourceViewer() {
       linkedCardCount > 0
         ? `このセグメントを参照しているカードが ${linkedCardCount} 件あります．削除しても旧版データは保持されるためカードは壊れませんが，原文ビューアからは消えます．削除しますか？`
         : 'このセグメントを削除しますか？（Undo で復元できます）';
-    if (!confirm(msg)) return;
+    if (!(await confirmDialog(msg))) return;
     applyCommand(makeDeleteSegmentCommand(segmentId, new Date().toISOString()));
   }
 

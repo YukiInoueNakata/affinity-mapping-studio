@@ -7,18 +7,23 @@
 // 一度に閾値以上の card / membership を変更する操作に確認ダイアログを挟み，
 // 誤爆を止める．通常のドラッグ 1 枚移動や少数選択の操作は対象外．
 
+import { confirmDialog } from '../services/confirmDialog.js';
+
 /** これ以上の枚数を 1 操作で変更するとき確認する． */
 export const BULK_CONFIRM_THRESHOLD = 20;
 
 /**
  * 一括操作の確認．count が閾値未満なら常に true（確認しない）．
- * 閾値以上なら window.confirm で確認し，OK のとき true．
+ * 閾値以上なら確認ダイアログを出し，OK のとき true．
  * テスト環境など window が無い場合は true（＝ブロックしない）．
+ *
+ * 2026-11-04: 非同期にした．デスクトップ版の window.confirm は，Windows では
+ * プラグインに差し替えられて常に真，macOS では何も出さずに偽を返すため使えない．
  */
-export function confirmBulkOperation(count: number, actionLabel: string): boolean {
+export async function confirmBulkOperation(count: number, actionLabel: string): Promise<boolean> {
   if (count < BULK_CONFIRM_THRESHOLD) return true;
   if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true;
-  return window.confirm(
+  return confirmDialog(
     `${count} 枚のカードを${actionLabel}します。よろしいですか？\n` +
       `（大量のカードを一度に変更しようとしています。意図しない操作の場合はキャンセルしてください）`
   );

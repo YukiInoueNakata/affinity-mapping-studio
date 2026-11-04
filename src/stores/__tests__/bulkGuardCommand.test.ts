@@ -40,34 +40,38 @@ describe('applyCommand の一括ガード (Codex#3)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('閾値以上・未確認の一括コマンドは confirm がキャンセルされたら適用されない', () => {
+  it('閾値以上・未確認の一括コマンドは confirm がキャンセルされたら適用されない', async () => {
     vi.stubGlobal('window', { confirm: vi.fn(() => false) });
     const store = useProjectStore.getState();
     store.applyCommand(makeFakeBulk(BULK_CONFIRM_THRESHOLD + 5));
+    await new Promise((r) => setTimeout(r, 0));
     expect(window.confirm).toHaveBeenCalledOnce();
     expect(pastLen()).toBe(0);
   });
 
-  it('閾値以上でも confirm が OK なら適用される', () => {
+  it('閾値以上でも confirm が OK なら適用される', async () => {
     vi.stubGlobal('window', { confirm: vi.fn(() => true) });
     const store = useProjectStore.getState();
     store.applyCommand(makeFakeBulk(BULK_CONFIRM_THRESHOLD + 5));
+    await new Promise((r) => setTimeout(r, 0));
     expect(window.confirm).toHaveBeenCalledOnce();
     expect(pastLen()).toBe(1);
   });
 
-  it('bulkConfirmed 済み (UI で確認済み) なら applyCommand は再確認しない', () => {
+  it('bulkConfirmed 済み (UI で確認済み) なら applyCommand は再確認しない', async () => {
     vi.stubGlobal('window', { confirm: vi.fn(() => false) });
     const store = useProjectStore.getState();
     store.applyCommand(markBulkConfirmed(makeFakeBulk(BULK_CONFIRM_THRESHOLD + 5)));
+    await new Promise((r) => setTimeout(r, 0));
     expect(window.confirm).not.toHaveBeenCalled();
     expect(pastLen()).toBe(1);
   });
 
-  it('閾値未満の一括コマンドは確認せず適用される', () => {
+  it('閾値未満の一括コマンドは確認せず適用される', async () => {
     vi.stubGlobal('window', { confirm: vi.fn(() => false) });
     const store = useProjectStore.getState();
     store.applyCommand(makeFakeBulk(BULK_CONFIRM_THRESHOLD - 1));
+    await new Promise((r) => setTimeout(r, 0));
     expect(window.confirm).not.toHaveBeenCalled();
     expect(pastLen()).toBe(1);
   });

@@ -315,9 +315,15 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       command.impactCount >= BULK_CONFIRM_THRESHOLD &&
       command.bulkConfirmed !== true
     ) {
-      if (!confirmBulkOperation(command.impactCount, command.bulkActionLabel ?? '一括変更')) {
-        return;
-      }
+      // 確認ダイアログは非同期（デスクトップ版の window.confirm は使えない）．
+      // いったん抜け，OK なら確認済みの印を付けて改めて適用する．
+      const confirmed = { ...command, bulkConfirmed: true } as typeof command;
+      void confirmBulkOperation(command.impactCount, command.bulkActionLabel ?? '一括変更').then(
+        (ok) => {
+          if (ok) get().applyCommand(confirmed);
+        }
+      );
+      return;
     }
     const nextData = command.apply(project.data);
     const nextPast = [...past, command].slice(-MAX_HISTORY);

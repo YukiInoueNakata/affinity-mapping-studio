@@ -1,3 +1,4 @@
+import { confirmDialog } from '../services/confirmDialog.js';
 import { useEffect, useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import {
@@ -313,12 +314,12 @@ function CodeWorksheet({ codeId }: { codeId: string }) {
     applyCommand(makeEditGtaCodeCommand(code.id, prev, next));
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!code) return;
     if (
-      !confirm(
+      !(await confirmDialog(
         `コード「${code.name}」を削除しますか？ 付与済み ${applications.length} 件も削除されます (Undo で復元可)`
-      )
+      ))
     )
       return;
     applyCommand(makeDeleteGtaCodeCommand(code, applications));

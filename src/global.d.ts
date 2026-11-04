@@ -6,3 +6,6 @@ declare const __INCLUDE_SYNC__: boolean;
 
 /** App version, injected from package.json `version` at build time (single source of truth). */
 declare const __APP_VERSION__: string;
+
+/** Year the app was built (for the software citation). */
+declare const __BUILD_YEAR__: string;

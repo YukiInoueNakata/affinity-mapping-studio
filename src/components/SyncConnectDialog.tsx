@@ -1,3 +1,4 @@
+import { confirmDialog } from '../services/confirmDialog.js';
 import { useEffect, useState } from 'react';
 import { useSyncManager } from '../sync/useSyncManager.js';
 import { formatRecentErrors, clearErrorBuffer } from '../utils/errorBuffer.js';
@@ -140,13 +141,13 @@ export function SyncConnectDialog({ open, onClose }: Props) {
       alert('接続中はクリアできません．先にキャンセル/切断してください．');
       return;
     }
-    const ok = window.confirm(
+    const ok = (await confirmDialog(
       'ローカルキャッシュを完全に削除します．\n\n' +
         '・サーバー上のデータは安全です\n' +
         '・接続前の未保存のローカル編集が失われる可能性があります\n' +
         '・「画面が真っ暗」「重複表示」が起きた時の修復用\n\n' +
         '続行しますか?',
-    );
+    ));
     if (!ok) return;
     setBusy(true);
     setError(null);
@@ -211,8 +212,8 @@ export function SyncConnectDialog({ open, onClose }: Props) {
     }
   };
 
-  const handleClearLogs = () => {
-    if (window.confirm('診断ログをクリアしますか?')) {
+  const handleClearLogs = async () => {
+    if ((await confirmDialog('診断ログをクリアしますか?'))) {
       clearErrorBuffer();
       alert('クリアしました');
     }

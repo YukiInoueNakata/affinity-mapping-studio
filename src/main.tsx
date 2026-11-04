@@ -8,12 +8,24 @@ import { getVersion } from '@tauri-apps/api/app';
 import { App } from './App.js';
 import { SourceWindow } from './SourceWindow.js';
 import { useProjectStore } from './stores/projectStore.js';
-import { installErrorBuffer } from './utils/errorBuffer.js';
+import { installErrorBuffer, logEvent } from './utils/errorBuffer.js';
 import './styles.css';
 
 // v0.2.15: 診断用エラーログ buffer をすべての import より前に install して
 // 早期のエラーも捕捉．
 installErrorBuffer();
+
+// window.confirm を本来のものに戻す（念のための安全側の手当て）．
+// tauri-plugin-dialog が差し替えた版は Promise（常に真）を返し，確認が必ず素通りする．
+// 本来の confirm は Windows では止まって true / false を返し，macOS では何も出さずに
+// false を返す（＝実行されない側に倒れる）．アプリの確認は services/confirmDialog.ts の
+// confirmDialog を使い，window.confirm は使わない（noNativeConfirm.test.ts で検査）．
+// 本来の confirm は src-tauri/src/lib.rs の kj-native-confirm が先に取っておく．
+{
+  const w = window as unknown as { __kjNativeConfirm?: (m?: string) => boolean };
+  if (typeof w.__kjNativeConfirm === 'function') window.confirm = w.__kjNativeConfirm;
+  else if ('__TAURI_INTERNALS__' in window) logEvent('native confirm was not captured; confirm dialogs may not block');
+}
 
 // ウィンドウタイトルを「Affinity Mapping Studio v0.x.y」形式に動的設定．
 // 商標配慮のため表示名を「KJ Studio」→「Affinity Mapping Studio」へ変更 (2026-06-15)．

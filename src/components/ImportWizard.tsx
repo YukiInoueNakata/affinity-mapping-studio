@@ -1,3 +1,4 @@
+import { confirmDialog } from '../services/confirmDialog.js';
 import { useEffect, useMemo, useState } from 'react';
 import type { Participant } from '@shared/types/domain';
 import type { ReadTextFileResult } from '@shared/types/ipc';
@@ -414,7 +415,7 @@ export function ImportWizard({ open, onClose }: Props) {
     };
   }, [onConfirmStep, project, buildPreview, previewPlan, commentMode, file]);
 
-  function handleConfirm() {
+  async function handleConfirm() {
     if (!project || !previewPlan) {
       setError('ファイルを選択してください');
       return;
@@ -438,11 +439,11 @@ export function ImportWizard({ open, onClose }: Props) {
         // v0.2.14 Fix-2: 重複コードでも confirm 後に既存 participant へ追加取込
         const existing = project.data.participants.find((p) => p.code === code);
         if (existing) {
-          const ok = window.confirm(
+          const ok = (await confirmDialog(
             `参加者コード "${code}" は既に存在します (${existing.displayName})．\n\n` +
               `既存の "${code}" に追加で取り込みますか?\n` +
               `(セグメントとカードは新規発番されます．既存データは変更されません．)`,
-          );
+          ));
           if (!ok) {
             setError('取り込みを中止しました');
             return;

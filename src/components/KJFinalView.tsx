@@ -8,6 +8,7 @@
 // - ドラッグ → undo/redo 可．Delete キーで選択中の図形を削除．
 // - 左: 図形パレット (KJ 標準記号 + 装飾)．右: メンバーカード一覧 + 叙述メモ．
 
+import { useRegisterExportTarget, useRenderAll } from '../services/canvasExport.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
@@ -101,6 +102,8 @@ function KJFinalViewImpl() {
   const selectGroup = useProjectStore((s) => s.selectGroup);
   const selectedGroupId = useProjectStore((s) => s.selectedGroupId);
   const { screenToFlowPosition } = useReactFlow();
+  useRegisterExportTarget();
+  const renderAll = useRenderAll();
 
   // パレットの "配置待ち" 種別 (null = 通常モード)．
   const [pendingKind, setPendingKind] = useState<FinalDiagramShapeKind | null>(null);
@@ -323,7 +326,7 @@ function KJFinalViewImpl() {
           onPaneClick={onPaneClick}
           fitView
           proOptions={{ hideAttribution: true }}
-          onlyRenderVisibleElements
+          onlyRenderVisibleElements={!renderAll}
         >
           <Background />
           <Controls />

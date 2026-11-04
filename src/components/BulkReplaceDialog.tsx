@@ -1,3 +1,4 @@
+import { confirmDialog } from '../services/confirmDialog.js';
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import {
@@ -52,12 +53,12 @@ export function BulkReplaceDialog({ open, onClose }: Props) {
     });
   };
 
-  const handleApply = () => {
+  const handleApply = async () => {
     if (!project || hits.length === 0) return;
     if (
-      !confirm(
+      !(await confirmDialog(
         `${hits.length} 件のフィールドで ${totalMatches} 箇所を置換します．Undo で戻せます．実行しますか？`
-      )
+      ))
     )
       return;
     applyCommand(

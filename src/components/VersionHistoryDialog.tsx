@@ -1,3 +1,4 @@
+import { confirmDialog } from '../services/confirmDialog.js';
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import { useSyncManager } from '../sync/useSyncManager.js';
@@ -56,7 +57,7 @@ export function VersionHistoryDialog({ open, onClose }: Props) {
     setView('list');
   };
 
-  const handleRestore = (id: string) => {
+  const handleRestore = async (id: string) => {
     // レビュー rank3: 接続中の復元は applyDiff で「スナップショット以後に他の参加者が
     // 追加したカード/グループ」をルーム全体から削除し，全員に伝播する (ローカル可逆
     // ではない)．旧確認文「保存しなければファイルには反映されません」は誤誘導だった．
@@ -69,13 +70,13 @@ export function VersionHistoryDialog({ open, onClose }: Props) {
         '。\n本当に実行しますか？'
       : 'このスナップショットの状態でプロジェクトを上書きしますか？\n' +
         '現在の状態は失われます (保存しなければファイルには反映されません)';
-    if (!confirm(msg)) return;
+    if (!(await confirmDialog(msg))) return;
     restoreSnapshot(id);
     onClose();
   };
 
-  const handleDelete = (id: string) => {
-    if (!confirm('このスナップショットを削除しますか?')) return;
+  const handleDelete = async (id: string) => {
+    if (!(await confirmDialog('このスナップショットを削除しますか?'))) return;
     removeSnapshot(id);
   };
 

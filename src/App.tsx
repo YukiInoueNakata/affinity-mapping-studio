@@ -1,3 +1,4 @@
+import { confirmDialog } from './services/confirmDialog.js';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useProjectStore } from './stores/projectStore.js';
 import { logEvent } from './utils/errorBuffer.js';
@@ -18,6 +19,10 @@ import { SyncConnectDialog } from './components/SyncConnectDialog.js';
 import { SyncStatusBadge } from './components/SyncStatusBadge.js';
 import { syncManager, type SyncState } from './sync/syncManager.js';
 import { ExportDialog } from './components/ExportDialog.js';
+import { LevelView } from './components/LevelView.js';
+import { LevelTableExportDialog } from './components/LevelTableExportDialog.js';
+import { AboutDialog, UpdateDialog } from './components/AboutDialog.js';
+import { autoCheckForUpdate, type UpdateInfo } from './services/updater.js';
 import { WordExportWizard } from './components/WordExportWizard.js';
 import { HierarchyPane } from './components/HierarchyPane.js';
 import { CardPlacementPane } from './components/CardPlacementPane.js';
@@ -72,6 +77,20 @@ export function App() {
   const setCanvasMode = useProjectStore((s) => s.setCanvasInteractionMode);
 
   const [centerTab, setCenterTab] = useState<CenterTab>('canvas');
+  /** キャンバスのタブで見ている段 (1 = 今のキャンバス，2 以上 = LevelView)． */
+  const [canvasLevel, setCanvasLevel] = useState<number>(1);
+  const [levelTableOpen, setLevelTableOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  // 起動して少し待ってから，新しい版を自動で確認する (1 日 1 回まで・設定で切れる)．
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      void autoCheckForUpdate().then((info) => {
+        if (info) setUpdateInfo(info);
+      });
+    }, 5000);
+    return () => window.clearTimeout(t);
+  }, []);
   const [ribbonTab, setRibbonTab] = useState<
     'file' | 'edit' | 'view' | 'align' | 'bulk'
   >('file');
@@ -146,7 +165,7 @@ export function App() {
 
   const openRecent = useCallback(
     async (path: string) => {
-      if (isDirty && !confirm('未保存の変更があります。破棄して別のプロジェクトを開きますか？')) return;
+      if (isDirty && !(await confirmDialog('未保存の変更があります。破棄して別のプロジェクトを開きますか？'))) return;
       let r: Awaited<ReturnType<typeof projectService.openProjectByPath>> = null;
       try {
         r = await projectService.openProjectByPath(path);
@@ -168,6 +187,7 @@ export function App() {
           return;
         }
         loadProject(r.filePath, r.project);
+        setCanvasLevel(1);
         setRecentMenuOpen(false);
       } else {
         alert(`ファイルを開けませんでした: ${path}\n削除されたか、別の場所に移動した可能性があります。`);
@@ -336,9 +356,11 @@ export function App() {
         selectSegment(hit.refId);
       } else if (hit.kind === 'card') {
         setCenterTab('canvas');
+        setCanvasLevel(1); // 第 2 段以降のタブでは CanvasView が無く，移動が効かないため
         selectCard(hit.refId);
       } else if (hit.kind === 'group' || hit.kind === 'label') {
         setCenterTab('canvas');
+        setCanvasLevel(1);
         selectGroup(hit.refId);
       }
     },
@@ -365,6 +387,7 @@ export function App() {
       if (!cardId) return;
       setMode('kj');
       setCenterTab('canvas');
+      setCanvasLevel(1); // kj.centerOnCard を待ち受けるのは第 1 段の CanvasView だけ
       window.setTimeout(() => {
         window.dispatchEvent(
           new CustomEvent('kj.centerOnCard', { detail: { cardId } })
@@ -380,6 +403,7 @@ export function App() {
       if (!groupId) return;
       setMode('kj');
       setCenterTab('canvas');
+      setCanvasLevel(1);
       window.setTimeout(() => {
         window.dispatchEvent(
           new CustomEvent('kj.centerOnGroup', { detail: { groupId } })
@@ -394,8 +418,8 @@ export function App() {
     };
   }, [setMode]);
 
-  const onNew = useCallback(() => {
-    if (isDirty && !confirm('未保存の変更があります。破棄して新規プロジェクトを作りますか？')) return;
+  const onNew = useCallback(async () => {
+    if (isDirty && !(await confirmDialog('未保存の変更があります。破棄して新規プロジェクトを作りますか？'))) return;
     setNewProjectOpen(true);
   }, [isDirty]);
 
@@ -404,6 +428,7 @@ export function App() {
       const name = rawName.trim() || '新規プロジェクト';
       const p = await projectService.newProject(name);
       loadProject(null, p);
+      setCanvasLevel(1);
       setNewProjectOpen(false);
     },
     [loadProject]
@@ -413,9 +438,10 @@ export function App() {
   // 即座に作って canvas をマウント → Sync ダイアログを開く．接続成功すると
   // Y.Doc の中身（ルーム既存データ）が yjsBridge 経由で Zustand に流れ込む．
   const onConnectExisting = useCallback(async () => {
-    if (isDirty && !confirm('未保存の変更があります．破棄してサーバーに接続しますか？')) return;
+    if (isDirty && !(await confirmDialog('未保存の変更があります．破棄してサーバーに接続しますか？'))) return;
     const p = await projectService.newProject('（サーバー接続中…）');
     loadProject(null, p);
+    setCanvasLevel(1);
     setSyncDialogOpen(true);
   }, [isDirty, loadProject]);
 
@@ -439,7 +465,7 @@ export function App() {
   const zoomReset = useCallback(() => setUiScale(1), [setUiScale]);
 
   const onOpen = useCallback(async () => {
-    if (isDirty && !confirm('未保存の変更があります。破棄して別のプロジェクトを開きますか？')) return;
+    if (isDirty && !(await confirmDialog('未保存の変更があります。破棄して別のプロジェクトを開きますか？'))) return;
     let r: Awaited<ReturnType<typeof projectService.openProject>>;
     try {
       r = await projectService.openProject();
@@ -463,6 +489,7 @@ export function App() {
       return;
     }
     loadProject(r.filePath, r.project);
+    setCanvasLevel(1);
   }, [isDirty, loadProject, inRoom]);
 
   // 2026-07 レビュー A2/A4: 保存の多重起動ガード + 失敗の可視化．
@@ -831,6 +858,17 @@ export function App() {
     if (!project) return 1;
     return project.data.groups.reduce((m, g) => Math.max(m, g.level), 1);
   }, [project]);
+
+  // 段のタブ: 別のプロジェクトを開いたら第 1 段に戻す．グループが減ってタブが
+  // 無くなったら，残っている最上のタブに合わせる (どのタブも選ばれていない状態を作らない)．
+  const projectIdForTabs = project?.metadata.project_id ?? null;
+  useEffect(() => {
+    setCanvasLevel(1);
+  }, [projectIdForTabs]);
+  useEffect(() => {
+    const maxTab = Math.max(1, maxGroupLevelInProject) + 1;
+    setCanvasLevel((cur) => (cur > maxTab ? maxTab : cur));
+  }, [maxGroupLevelInProject]);
 
   const selectedCardIds = useProjectStore((s) => s.selectedCardIds);
   const selectedGroupIds = useProjectStore((s) => s.selectedGroupIds);
@@ -1241,9 +1279,14 @@ export function App() {
         <div className="ribbon-row-1">
           <div className="app-title">
             {title}
-            <span className="app-version" title={`Affinity Mapping Studio v${__APP_VERSION__}`}>
+            <button
+              type="button"
+              className="app-version app-version-btn"
+              onClick={() => setAboutOpen(true)}
+              title={`Affinity Mapping Studio v${__APP_VERSION__}（押すと「このソフトについて」）`}
+            >
               v{__APP_VERSION__}
-            </span>
+            </button>
           </div>
           <nav className="ribbon-tabs">
             <button
@@ -1565,6 +1608,27 @@ export function App() {
                 >
                   <span className="rb-glyph">W</span>
                   <span>Word 出力</span>
+                </button>
+                <button
+                  type="button"
+                  className="rb-btn-lg"
+                  onClick={() => setLevelTableOpen(true)}
+                  disabled={!project}
+                  title="段の範囲 (例: 第 4 段から第 2 段まで) を Excel / CSV の表で出力"
+                >
+                  <span className="rb-glyph">T</span>
+                  <span>段の表</span>
+                </button>
+              </RibbonSection>
+              <RibbonSection label="情報">
+                <button
+                  type="button"
+                  className="rb-btn-lg"
+                  onClick={() => setAboutOpen(true)}
+                  title="版・作者・引用の仕方・新しい版の確認"
+                >
+                  <span className="rb-glyph">i</span>
+                  <span>このソフトについて</span>
                 </button>
               </RibbonSection>
             </>
@@ -2064,7 +2128,31 @@ export function App() {
               )}
               <section className="center-pane">
                 {centerTab === 'canvas' ? (
-                  <CanvasView />
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    <div className="level-tabs" role="tablist" aria-label="段">
+                      {Array.from(
+                        { length: Math.max(1, maxGroupLevelInProject) + 1 },
+                        (_, i) => i + 1
+                      ).map((lv) => (
+                        <button
+                          key={lv}
+                          type="button"
+                          role="tab"
+                          aria-selected={canvasLevel === lv}
+                          className={canvasLevel === lv ? 'level-tab active' : 'level-tab'}
+                          onClick={() => setCanvasLevel(lv)}
+                          title={
+                            lv === 1
+                              ? '第 1 段: カードを並べてグループにする (今までのキャンバス)'
+                              : `第 ${lv} 段: 第 ${lv - 1} 段までのまとまりを並べて束ねる`
+                          }
+                        >
+                          第{lv}段
+                        </button>
+                      ))}
+                    </div>
+                    {canvasLevel <= 1 ? <CanvasView /> : <LevelView level={canvasLevel} />}
+                  </div>
                 ) : centerTab === 'final' ? (
                   <KJFinalView />
                 ) : (
@@ -2229,6 +2317,16 @@ export function App() {
       <TagEditorDialog open={tagEditorOpen} onClose={() => setTagEditorOpen(false)} />
       <VersionHistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
+      <LevelTableExportDialog open={levelTableOpen} onClose={() => setLevelTableOpen(false)} />
+      <AboutDialog
+        open={aboutOpen}
+        onClose={() => setAboutOpen(false)}
+        onUpdateFound={(info) => {
+          setAboutOpen(false);
+          setUpdateInfo(info);
+        }}
+      />
+      {updateInfo && <UpdateDialog info={updateInfo} onClose={() => setUpdateInfo(null)} />}
       <WordExportWizard open={wordWizardOpen} onClose={() => setWordWizardOpen(false)} />
       <PromptDialog
         open={newProjectOpen}

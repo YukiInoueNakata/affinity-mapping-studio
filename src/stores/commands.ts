@@ -16,6 +16,7 @@ import type {
   GroupMembership,
   GroupPosition,
   Label,
+  LevelPosition,
   MGtaCategory,
   MGtaConcept,
   MGtaConceptStatus,
@@ -1711,6 +1712,8 @@ export function makeDeleteGroupCommand(
   ancestorBoundsUpdates: Array<{ prev: GroupPosition; next: GroupPosition }> = []
 ): DomainCommand {
   const membershipIds = new Set(memberships.map((m) => m.id));
+  // 段のタブの配置 (level_positions) は apply 時点の行を控えて消し，revert で戻す．
+  let removedLevelPositions: LevelPosition[] = [];
   const nextById = new Map(
     ancestorBoundsUpdates.map((u) => [u.next.groupId, u.next])
   );
@@ -1719,17 +1722,30 @@ export function makeDeleteGroupCommand(
   );
   return {
     label: `グループ削除: ${group.name}`,
-    apply: (d) => ({
-      ...d,
-      groups: d.groups.filter((g) => g.id !== group.id),
-      labels: d.labels.filter((l) => l.groupId !== group.id),
-      group_positions: d.group_positions
-        .filter((p) => p.groupId !== group.id)
-        .map((p) => (nextById.has(p.groupId) ? nextById.get(p.groupId)! : p)),
-      group_memberships: d.group_memberships.filter((m) => !membershipIds.has(m.id)),
-    }),
+    apply: (d) => {
+      const lp = d.level_positions ?? [];
+      removedLevelPositions = lp.filter(
+        (p) => p.itemKind === 'group' && p.itemId === group.id
+      );
+      return {
+        ...d,
+        groups: d.groups.filter((g) => g.id !== group.id),
+        labels: d.labels.filter((l) => l.groupId !== group.id),
+        group_positions: d.group_positions
+          .filter((p) => p.groupId !== group.id)
+          .map((p) => (nextById.has(p.groupId) ? nextById.get(p.groupId)! : p)),
+        group_memberships: d.group_memberships.filter((m) => !membershipIds.has(m.id)),
+        // 段のタブの配置も消す (残すと孤児の行が溜まる)．
+        ...(removedLevelPositions.length > 0
+          ? { level_positions: lp.filter((p) => !removedLevelPositions.includes(p)) }
+          : {}),
+      };
+    },
     revert: (d) => ({
       ...d,
+      ...(removedLevelPositions.length > 0
+        ? { level_positions: [...(d.level_positions ?? []), ...removedLevelPositions] }
+        : {}),
       groups: [...d.groups, group],
       labels: label ? [...d.labels, label] : d.labels,
       group_positions: [
@@ -2665,5 +2681,70 @@ export function makeSetFinalGroupLayoutBulkCommand(
       moves.reduce((acc, m) => withFinalLayoutEntry(acc, m.groupId, m.next), d),
     revert: (d) =>
       moves.reduce((acc, m) => withFinalLayoutEntry(acc, m.groupId, m.prev), d),
+  };
+}
+
+// ---- 段のタブ (level_positions) -------------------------------------------
+
+/** 段のタブの配置を書く (id で upsert)．prev が undefined の行は revert で消す．
+ *  行は「動かしたときだけ」書く (seed しない) のが決まり． */
+export function makeSetLevelPositionsCommand(
+  changes: Array<{ prev: LevelPosition | undefined; next: LevelPosition }>,
+  label = '段のタブ: 配置'
+): DomainCommand {
+  const upsert = (d: ProjectData, recs: LevelPosition[], removeIds: Set<string>): ProjectData => {
+    const byId = new Map(recs.map((r) => [r.id, r] as const));
+    const cur = d.level_positions ?? [];
+    const seen = new Set<string>();
+    const out: LevelPosition[] = [];
+    for (const p of cur) {
+      if (removeIds.has(p.id)) continue;
+      if (byId.has(p.id)) {
+        if (seen.has(p.id)) continue;
+        seen.add(p.id);
+        out.push(byId.get(p.id)!);
+      } else {
+        out.push(p);
+      }
+    }
+    for (const r of recs) if (!seen.has(r.id)) out.push(r);
+    return { ...d, level_positions: out };
+  };
+  // 共同編集のための守り (2026-11 Codex レビュー):
+  // - apply / redo: 指すグループ・カードがもう無い行は書かない (削除で消した行を蘇らせない)．
+  // - revert / undo: 今の行が，このコマンドが書いたまま (next と同じ) のときだけ戻す．
+  //   ほかの人がその後で動かした行は，その人の配置を残す．
+  const itemExists = (d: ProjectData, p: LevelPosition) =>
+    p.itemKind === 'group' ? d.groups.some((g) => g.id === p.itemId) : d.cards.some((c) => c.id === p.itemId);
+  const sameAsNext = (cur: LevelPosition | undefined, next: LevelPosition) =>
+    !!cur && cur.x === next.x && cur.y === next.y && cur.width === next.width && cur.height === next.height;
+  return {
+    label,
+    apply: (d) =>
+      upsert(
+        d,
+        changes.map((c) => c.next).filter((n) => itemExists(d, n)),
+        new Set()
+      ),
+    revert: (d) => {
+      const curById = new Map<string, LevelPosition>();
+      for (const p of d.level_positions ?? []) if (!curById.has(p.id)) curById.set(p.id, p);
+      const mine = changes.filter((c) => sameAsNext(curById.get(c.next.id), c.next));
+      return upsert(
+        d,
+        mine.filter((c) => c.prev && itemExists(d, c.prev)).map((c) => c.prev!),
+        new Set(mine.filter((c) => !c.prev).map((c) => c.next.id))
+      );
+    },
+  };
+}
+
+/** 複数のコマンドを 1 回の undo/redo にまとめる (revert は逆順)． */
+export function makeCompositeCommand(label: string, cmds: DomainCommand[]): DomainCommand {
+  return {
+    label,
+    apply: (d) => cmds.reduce((acc, c) => c.apply(acc), d),
+    revert: (d) => cmds.reduceRight((acc, c) => c.revert(acc), d),
+    impactCount: cmds.reduce((n, c) => n + (c.impactCount ?? 0), 0) || undefined,
   };
 }

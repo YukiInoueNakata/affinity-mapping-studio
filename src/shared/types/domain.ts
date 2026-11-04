@@ -165,6 +165,22 @@ export interface GroupPosition {
   height: number;
 }
 
+/** 第 2 段以降の「段のタブ」での配置 (2026-11 追加・tables の level_positions)．
+ *  第 1 段は card_positions / group_positions を使うので，ここには入らない．
+ *  行は利用者が動かしたときにだけ書く (無ければ既定の配置を計算して表示するだけ．
+ *  tombstone を増やさないため)．id は `lv<level>-<itemId>` の決まった値にし，
+ *  複数の端末で同時に作られた重複は yjsBridge の uniqById / applyDiff が 1 行にまとめる． */
+export interface LevelPosition {
+  id: string;
+  level: number;
+  itemKind: 'group' | 'card';
+  itemId: string;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+}
+
 export type TextRevisionTargetType = 'label';
 
 export type TextRevisionFieldName = 'text' | 'sharedMemo' | 'basisMemo' | 'holdMemo';
@@ -475,6 +491,8 @@ export interface ProjectData {
   gta_codes: GtaCode[];
   gta_code_applications: GtaCodeApplication[];
   gta_categories: GtaCategory[];
+  /** 段のタブ (第 2 段以降) の配置．旧データには無いので省略可．読むときは `?? []`． */
+  level_positions?: LevelPosition[];
   /** KJ 法 1986/1997 版「A 型図解化」専用のデータ (schema v9 で追加)．
    *  存在しない場合は空 (`createEmptyFinalDiagram()`) として扱う．
    *  data 配下に置くことで，DomainCommand での undo/redo に乗る． */

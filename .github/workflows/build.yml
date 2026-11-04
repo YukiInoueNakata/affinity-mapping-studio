@@ -23,13 +23,19 @@ jobs:
             rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
             bundles: 'app,dmg'
             artifact-name: kj-studio-macos-universal
-            artifact-glob: 'src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg'
+            # dmg に加えて，自動更新用の .app.tar.gz とその署名 (.sig) も添付する．
+            artifact-glob: |
+              src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+              src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+              src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             rust-targets: 'x86_64-pc-windows-msvc'
             bundles: 'msi'
             artifact-name: kj-studio-windows-x64-msi
-            artifact-glob: 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi'
+            artifact-glob: |
+              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi.sig
 
     runs-on: ${{ matrix.platform }}
 
@@ -51,6 +57,10 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Tauri build
+        # 自動更新の署名 (createUpdaterArtifacts)．鍵が無いとビルドが止まる．
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
       - name: Upload artifact

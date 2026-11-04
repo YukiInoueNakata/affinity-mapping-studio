@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { toPng, toSvg } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { useProjectStore } from '../stores/projectStore.js';
+import { captureWholeFlow } from '../services/canvasExport.js';
 
 type Format = 'png' | 'pdf' | 'svg';
 
@@ -16,15 +16,6 @@ interface PreviewState {
   /** natural (pre-scale) width / height of the captured viewport */
   width: number;
   height: number;
-}
-
-/**
- * Locate the React Flow viewport DOM element. We capture the inner
- * `.react-flow__viewport` (which holds the nodes/edges layer) rather than
- * the whole canvas chrome (controls / minimap) for a clean export.
- */
-function findViewportEl(): HTMLElement | null {
-  return document.querySelector<HTMLElement>('.react-flow__viewport');
 }
 
 export function ExportDialog({ open, onClose }: Props) {
@@ -80,28 +71,11 @@ export function ExportDialog({ open, onClose }: Props) {
   if (!open) return null;
 
   const generatePreview = async () => {
-    const el = findViewportEl();
-    if (!el) {
-      alert('キャンバスが見つかりません．キャンバスを表示してから再試行してください．');
-      return;
-    }
     setBusy(true);
     try {
-      // Use html-to-image to render the viewport. The default options work
-      // for our DOM nodes.
-      const fn = format === 'svg' ? toSvg : toPng;
-      const dataUrl = await fn(el, {
-        backgroundColor: '#ffffff',
-        pixelRatio: 2,
-        skipFonts: false,
-      });
-      const rect = el.getBoundingClientRect();
-      setPreview({
-        dataUrl,
-        format,
-        width: rect.width,
-        height: rect.height,
-      });
+      // 画面の見え方（ずらし・拡大・欄の幅）に関係なく，図全体を等倍で写す．
+      const { dataUrl, width, height } = await captureWholeFlow(format === 'svg' ? 'svg' : 'png');
+      setPreview({ dataUrl, format, width, height });
     } catch (e) {
       alert(`プレビュー生成に失敗しました: ${(e as Error).message}`);
     } finally {

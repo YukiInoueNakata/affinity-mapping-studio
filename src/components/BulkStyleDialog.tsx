@@ -1,3 +1,4 @@
+import { confirmDialog } from '../services/confirmDialog.js';
 import { useEffect, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import {
@@ -89,9 +90,9 @@ export function BulkStyleDialog({ open, onClose }: Props) {
     onClose();
   };
 
-  const handleClear = () => {
+  const handleClear = async () => {
     if (targetIds.length === 0) return;
-    if (!confirm(`${targetIds.length} 件のスタイルをリセットしますか？`)) return;
+    if (!(await confirmDialog(`${targetIds.length} 件のスタイルをリセットしますか？`))) return;
     const now = new Date().toISOString();
     if (isCardTarget) {
       const prevMap = new Map<string, DisplayStyle | undefined>();

@@ -59,11 +59,7 @@ Open the top release (marked "Latest") and pick one file for your computer from 
 
    ![Install location (Next)](images/getting-started/win-07b-setup.png)
 
-7. The installer asks two questions. Usually answer "Yes" (はい) to both.
-   - "Create a Desktop shortcut?"
-   - "Add to Start Menu / All Apps?"
-
-   ![Desktop shortcut](images/getting-started/win-08a-desktop-shortcut.png)
+7. The installer asks "Add to Start Menu / All Apps?". Usually answer "Yes" (はい).
 
    ![Add to the Start menu](images/getting-started/win-08b-start-menu-reg.png)
 
@@ -71,7 +67,7 @@ Open the top release (marked "Latest") and pick one file for your computer from 
 
    ![Installation complete (Next)](images/getting-started/win-09-setup-complete.png)
 
-9. Click "Finish" (完了). If "Run Affinity Mapping Studio" is checked, the app starts right away.
+9. Click "Finish" (完了). If "Run Affinity Mapping Studio" is checked, the app starts right away. If "Create desktop shortcut" (デスクトップショートカットを作成する) is checked, a shortcut is added to the desktop.
 
    ![Finish](images/getting-started/win-09b-setup-finish.png)
 

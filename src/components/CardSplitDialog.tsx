@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Card } from '@shared/types/domain';
+import { splitSentences } from '../domain/sentences.js';
 
 interface Props {
   open: boolean;
@@ -74,8 +75,7 @@ export function CardSplitDialog({ open, card, onClose, onConfirm }: Props) {
       .filter((p) => p.length > 0).length;
   }, [workingText]);
   const sentenceCount = useMemo(() => {
-    return workingText
-      .split(/(?<=[。．！？!?])\s*|(?<=\.)\s+/u)
+    return splitSentences(workingText)
       .map((p) => p.trim())
       .filter((p) => p.length > 0).length;
   }, [workingText]);
@@ -104,7 +104,7 @@ export function CardSplitDialog({ open, card, onClose, onConfirm }: Props) {
     applySegments(workingText.split(/\n/), '改行ごと');
   const handleBySentence = () =>
     applySegments(
-      workingText.split(/(?<=[。．！？!?])\s*|(?<=\.)\s+/u),
+      splitSentences(workingText),
       '文 (句点) ごと'
     );
 

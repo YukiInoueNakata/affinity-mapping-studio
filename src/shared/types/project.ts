@@ -62,6 +62,7 @@ const ALL_TABLE_NAMES = [
   'gta_codes',
   'gta_code_applications',
   'gta_categories',
+  'level_positions',
 ] as const;
 
 /** 旧バージョンで保存されたプロジェクト (後発テーブルのファイルが無い) を
@@ -118,6 +119,7 @@ export function makeEmptyProject(name: string, projectId: string, now: string): 
       gta_codes: [],
       gta_code_applications: [],
       gta_categories: [],
+      level_positions: [],
     },
   };
 }

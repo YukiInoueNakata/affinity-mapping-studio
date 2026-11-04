@@ -20,6 +20,8 @@ export default defineConfig({
   define: {
     __INCLUDE_SYNC__: 'true',
     __APP_VERSION__: JSON.stringify(pkg.version),
+    // ソフトの引用文の年 (ビルドした年)．
+    __BUILD_YEAR__: JSON.stringify(String(new Date().getFullYear())),
   },
   resolve: {
     alias: {

@@ -1,3 +1,4 @@
+import { formatLocal } from '../utils/localTime.js';
 import type { ProjectData, ProjectMetadata } from '@shared/types/domain';
 
 export interface ProjectStatistics {
@@ -75,8 +76,8 @@ export function statisticsToMarkdown(
   const lines: string[] = [];
   lines.push(`# プロジェクト統計: ${metadata.name}`);
   lines.push('');
-  lines.push(`- 作成日: ${metadata.created_at.slice(0, 10)}`);
-  lines.push(`- 最終更新: ${metadata.updated_at.slice(0, 10)}`);
+  lines.push(`- 作成日: ${formatLocal(metadata.created_at, 'date')}`);
+  lines.push(`- 最終更新: ${formatLocal(metadata.updated_at, 'date')}`);
   if (metadata.description) lines.push(`- 説明: ${metadata.description}`);
   lines.push('');
   lines.push('## データ規模');

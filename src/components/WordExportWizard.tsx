@@ -1,3 +1,4 @@
+import { fileTimestamp } from '../utils/localTime.js';
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
 import {
@@ -86,7 +87,7 @@ export function WordExportWizard({ open, onClose }: Props) {
         /[\\/:*?"<>|]/g,
         '_'
       );
-      const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+      const ts = fileTimestamp();
       // Tauri: pick a destination via the native dialog, then hand the bytes to
       // Rust to write (the WebView2 renderer can't touch the filesystem itself).
       const path = await invoke<string | null>('pick_save_file', {

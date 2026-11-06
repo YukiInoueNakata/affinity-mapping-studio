@@ -2,6 +2,7 @@
 // 例: 第 4 段から第 2 段まで → 1 行 = 第 2 段のグループ 1 つ，列 = 第 4〜2 段のコードと表札．
 // 下の段に「カード」を選ぶと 1 行 = カード 1 枚．計算は domain/levels.ts の buildLevelTable．
 
+import { fileTimestamp } from '../utils/localTime.js';
 import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import * as XLSX from 'xlsx';
@@ -44,7 +45,7 @@ export function LevelTableExportDialog({ open, onClose }: { open: boolean; onClo
     try {
       const safe = (project.metadata.name || 'project').replace(/[\\/:*?"<>|]/g, '_');
       const range = lo === 0 ? `L${hi}-cards` : `L${hi}-L${lo}`;
-      const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+      const ts = fileTimestamp();
       const fileName = `${safe}_${range}_${ts}.${format}`;
       let bytes: Uint8Array;
       if (format === 'xlsx') {

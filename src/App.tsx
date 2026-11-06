@@ -1,3 +1,5 @@
+import { MOD_KEY } from './utils/platform.js';
+import { formatLocal } from './utils/localTime.js';
 import { confirmDialog } from './services/confirmDialog.js';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useProjectStore } from './stores/projectStore.js';
@@ -1247,12 +1249,12 @@ export function App() {
       : !filePath
         ? '未保存 — 「保存」で .kjproj として保存'
         : autosaveFlash
-          ? `自動保存しました ${project.metadata.updated_at.slice(11, 19)}`
+          ? `自動保存しました ${formatLocal(project.metadata.updated_at, 'time')}`
           : isDirty
             ? autosaveEnabled
               ? `未保存 — 自動保存まで ${autosaveCountdown} 秒`
               : '未保存 (自動保存 OFF)'
-            : `保存済み ${project.metadata.updated_at.slice(11, 19)}`;
+            : `保存済み ${formatLocal(project.metadata.updated_at, 'time')}`;
 
   const saveStatusClass = !project
     ? ''
@@ -1510,7 +1512,7 @@ export function App() {
                     <button
                       type="button"
                       onClick={zoomOut}
-                      title="表示を縮小 (Ctrl + -)"
+                      title={`表示を縮小 (${MOD_KEY} + -)`}
                       style={{ width: 32 }}
                     >
                       −
@@ -1525,7 +1527,7 @@ export function App() {
                     <button
                       type="button"
                       onClick={zoomIn}
-                      title="表示を拡大 (Ctrl + +)"
+                      title={`表示を拡大 (${MOD_KEY} + +)`}
                       style={{ width: 32 }}
                     >
                       ＋
@@ -1543,7 +1545,7 @@ export function App() {
                     <button
                       type="button"
                       onClick={zoomReset}
-                      title="標準に戻す (Ctrl + 0)"
+                      title={`標準に戻す (${MOD_KEY} + 0)`}
                       style={{ flex: 1, fontSize: 11 }}
                     >
                       標準

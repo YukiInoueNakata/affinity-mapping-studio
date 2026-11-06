@@ -231,7 +231,7 @@ export function SyncConnectDialog({ open, onClose }: Props) {
         </header>
         <div className="modal-body">
           <p className="muted small">
-            KJ Studio Server に WebSocket で接続して共同編集を始めます．招待 URL を
+            共同編集のサーバー（AMS Server）に接続して共同編集を始めます．招待 URL を
             「招待 URL を貼付」欄に貼ると下のフィールドが自動入力されます．
           </p>
 

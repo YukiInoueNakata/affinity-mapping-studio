@@ -1,3 +1,5 @@
+import { MOD_KEY } from '../utils/platform.js';
+import { formatLocal } from '../utils/localTime.js';
 import { confirmDialog } from '../services/confirmDialog.js';
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import type { Label, TextRevisionFieldName } from '@shared/types/domain';
@@ -410,9 +412,9 @@ function CardRightPanel() {
           <dt>グループ</dt>
           <dd>{groupName ?? <span className="muted">未グループ化</span>}</dd>
           <dt>作成</dt>
-          <dd>{card.createdAt.slice(0, 19).replace('T', ' ')}</dd>
+          <dd>{formatLocal(card.createdAt, 'second')}</dd>
           <dt>更新</dt>
-          <dd>{card.updatedAt.slice(0, 19).replace('T', ' ')}</dd>
+          <dd>{formatLocal(card.updatedAt, 'second')}</dd>
         </dl>
         <label className="block-label">本文</label>
         <textarea
@@ -467,7 +469,7 @@ function CardRightPanel() {
           }}
           onDelete={async (entry) => {
             if (!card) return;
-            if (!(await confirmDialog(`このメモ (${entry.timestamp.slice(0, 16).replace('T', ' ')}) を削除しますか？`))) return;
+            if (!(await confirmDialog(`このメモ (${formatLocal(entry.timestamp, 'minute')}) を削除しますか？`))) return;
             applyCommand(
               makeDeleteCardMemoEntryCommand(
                 card.id,
@@ -864,9 +866,9 @@ function GroupRightPanel() {
             </>
           )}
           <dt>作成</dt>
-          <dd>{group.createdAt.slice(0, 19).replace('T', ' ')}</dd>
+          <dd>{formatLocal(group.createdAt, 'second')}</dd>
           <dt>更新</dt>
-          <dd>{group.updatedAt.slice(0, 19).replace('T', ' ')}</dd>
+          <dd>{formatLocal(group.updatedAt, 'second')}</dd>
         </dl>
       </section>
 
@@ -1005,9 +1007,9 @@ function RelationRightPanel() {
           <dt>To</dt>
           <dd>{targetName}</dd>
           <dt>作成</dt>
-          <dd>{relation.createdAt.slice(0, 19).replace('T', ' ')}</dd>
+          <dd>{formatLocal(relation.createdAt, 'second')}</dd>
           <dt>更新</dt>
-          <dd>{relation.updatedAt.slice(0, 19).replace('T', ' ')}</dd>
+          <dd>{formatLocal(relation.updatedAt, 'second')}</dd>
         </dl>
         <label className="block-label">関係種別</label>
         <select
@@ -1094,7 +1096,7 @@ function LabelTabs({ drafts, setDrafts, commitField, labelId }: LabelTabsProps) 
           onBlur={() => commitField('text')}
           onKeyDown={onLabelTextKeyDown}
           rows={3}
-          placeholder="（表札を入力．Enter で確定，Ctrl+Enter で改行）"
+          placeholder={`（表札を入力．Enter で確定，${MOD_KEY}+Enter で改行）`}
           style={{ width: '100%', boxSizing: 'border-box' }}
         />
       </section>
@@ -1226,7 +1228,7 @@ function RevisionHistoryDialog({
                   <div className="revision-meta">
                     <span className="revision-field">{fieldName(r.fieldName)}</span>
                     <span className="revision-time">
-                      {r.timestamp.slice(0, 19).replace('T', ' ')}
+                      {formatLocal(r.timestamp, 'second')}
                     </span>
                   </div>
                   <div className="revision-diff">
@@ -1287,7 +1289,7 @@ function MemoLogEditor({
             <li key={e.id} className="memo-log-entry">
               <div className="memo-log-entry-head">
                 <span className="memo-log-time">
-                  {e.timestamp.slice(0, 16).replace('T', ' ')}
+                  {formatLocal(e.timestamp, 'minute')}
                 </span>
                 <button
                   type="button"
@@ -1308,7 +1310,7 @@ function MemoLogEditor({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           rows={2}
-          placeholder="メモを追記 (Ctrl+Enter で確定)"
+          placeholder={`メモを追記 (${MOD_KEY}+Enter で確定)`}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
               e.preventDefault();

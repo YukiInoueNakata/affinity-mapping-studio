@@ -1,3 +1,5 @@
+import { MOD_KEY } from '../utils/platform.js';
+import { formatLocal } from '../utils/localTime.js';
 import { confirmDialog } from '../services/confirmDialog.js';
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
@@ -80,7 +82,7 @@ export function VersionHistoryDialog({ open, onClose }: Props) {
     removeSnapshot(id);
   };
 
-  const fmt = (iso: string) => iso.slice(0, 16).replace('T', ' ');
+  const fmt = (iso: string) => formatLocal(iso, 'minute');
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -180,7 +182,7 @@ export function VersionHistoryDialog({ open, onClose }: Props) {
               />
               <p className="muted small">
                 スナップショットは現在のプロジェクト全体をフリーズして保存します．
-                ファイル保存 (Ctrl+S) するまで .kjproj ファイルには書き込まれません．
+                ファイル保存 ({MOD_KEY}+S) するまで .kjproj ファイルには書き込まれません．
               </p>
               <div className="right-actions">
                 <button type="button" onClick={handleCreate}>

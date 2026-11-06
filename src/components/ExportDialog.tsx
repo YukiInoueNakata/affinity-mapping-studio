@@ -1,4 +1,7 @@
+import { fileTimestamp } from '../utils/localTime.js';
+import { dataUrlToBytes } from '../utils/dataUrl.js';
 import { useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { jsPDF } from 'jspdf';
 import { useProjectStore } from '../stores/projectStore.js';
 import { captureWholeFlow } from '../services/canvasExport.js';
@@ -83,13 +86,22 @@ export function ExportDialog({ open, onClose }: Props) {
     }
   };
 
-  const downloadDataUrl = (dataUrl: string, filename: string) => {
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+  // 2026-11-07: 以前は <a download> で保存していたため，保存先を選べず「ダウンロード」フォルダに
+  // 黙って入り，保存したという知らせも無かった（Mac では初回にアクセス許可も出た）．
+  // 段の表・Word 出力と同じく，保存先を選ぶ画面 → write_bytes → 保存したパスを知らせる，にする．
+  const saveBytes = async (
+    bytes: Uint8Array,
+    fileName: string,
+    filter: { name: string; extensions: string[] }
+  ) => {
+    const path = await invoke<string | null>('pick_save_file', {
+      title: '図の保存先',
+      defaultFileName: fileName,
+      filters: [filter],
+    });
+    if (!path) return;
+    await invoke('write_bytes', { path, contents: Array.from(bytes) });
+    alert(`保存しました:\n${path}`);
   };
 
   const handleExport = async () => {
@@ -101,16 +113,31 @@ export function ExportDialog({ open, onClose }: Props) {
       /[\\/:*?"<>|]/g,
       '_'
     );
-    const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+    const ts = fileTimestamp();
 
-    if (format === 'png') {
-      downloadDataUrl(preview.dataUrl, `${baseName}_${ts}.png`);
-      return;
+    try {
+      if (format === 'png') {
+        await saveBytes(dataUrlToBytes(preview.dataUrl), `${baseName}_${ts}.png`, {
+          name: 'PNG 画像',
+          extensions: ['png'],
+        });
+        return;
+      }
+      if (format === 'svg') {
+        await saveBytes(dataUrlToBytes(preview.dataUrl), `${baseName}_${ts}.svg`, {
+          name: 'SVG 画像',
+          extensions: ['svg'],
+        });
+        return;
+      }
+      await savePdf(baseName, ts);
+    } catch (e) {
+      alert(`図の保存に失敗しました: ${(e as Error).message}`);
     }
-    if (format === 'svg') {
-      downloadDataUrl(preview.dataUrl, `${baseName}_${ts}.svg`);
-      return;
-    }
+  };
+
+  const savePdf = async (baseName: string, ts: string) => {
+    if (!preview) return;
     // PDF: embed the PNG into a jsPDF page sized A4/A3/Letter
     const sizes: Record<'A4' | 'A3' | 'Letter', { w: number; h: number }> = {
       A4: { w: 297, h: 210 }, // mm, landscape default
@@ -145,7 +172,8 @@ export function ExportDialog({ open, onClose }: Props) {
     const x = (pageW - w) / 2;
     const y = (pageH - h) / 2;
     pdf.addImage(preview.dataUrl, 'PNG', x, y, w, h);
-    pdf.save(`${baseName}_${ts}.pdf`);
+    const out = pdf.output('arraybuffer');
+    await saveBytes(new Uint8Array(out), `${baseName}_${ts}.pdf`, { name: 'PDF', extensions: ['pdf'] });
   };
 
   return (

@@ -1,3 +1,4 @@
+import { formatLocal } from '../utils/localTime.js';
 import { confirmDialog } from '../services/confirmDialog.js';
 import { useEffect, useMemo, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
@@ -523,7 +524,7 @@ function CodeMemoRow({ memo }: { memo: TheoreticalMemo }) {
   return (
     <div className="mgta-memo-row">
       <div className="muted small">
-        [{memoTypeLabel(memo.memoType)}] {memo.updatedAt.slice(0, 16).replace('T', ' ')}
+        [{memoTypeLabel(memo.memoType)}] {formatLocal(memo.updatedAt, 'minute')}
       </div>
       <textarea
         value={draft}

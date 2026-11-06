@@ -1,3 +1,4 @@
+import { MOD_KEY } from '../utils/platform.js';
 import { confirmDialog } from '../services/confirmDialog.js';
 // 段のタブ (第 2 段以降)．
 //
@@ -439,7 +440,7 @@ function LevelViewImpl({ level }: { level: number }) {
       <div className="level-toolbar">
         <span className="muted small">
           第{level}段: 箱 {items.boxes.length} 個・グループ {items.frames.length} 個．
-          Shift か Ctrl を押しながらクリックで複数選択．
+          Shift か {MOD_KEY} を押しながらクリックで複数選択．
         </span>
         <button type="button" onClick={onGroup} disabled={!canGroup} title={`選んだ箱を，第 ${level} 段の新しいグループにまとめる`}>
           選んだ箱を第{level}段のグループにまとめる

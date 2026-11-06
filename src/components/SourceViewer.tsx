@@ -1,3 +1,4 @@
+import { MOD_KEY } from '../utils/platform.js';
 import { confirmDialog } from '../services/confirmDialog.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.js';
@@ -849,7 +850,7 @@ export function SourceViewer() {
           </>
         ) : (
           <span className="hint">
-            ドラッグで範囲選択 / Ctrl+クリックで複数セグメント / Shift+クリックで範囲拡張
+            ドラッグで範囲選択 / {MOD_KEY}+クリックで複数セグメント / Shift+クリックで範囲拡張
           </span>
         )}
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>

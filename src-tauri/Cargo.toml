@@ -1,6 +1,6 @@
 [package]
 name = "affinity-mapping-tauri"
-version = "0.2.32"
+version = "0.2.33"
 description = "Affinity Mapping Studio (Tauri 統合版)."
 license = "Apache-2.0"
 edition = "2021"

@@ -85,8 +85,10 @@ jobs:
             ## macOS (Universal DMG)
 
             1. Finder で DMG をマウント → `Affinity Mapping Studio.app` を `/Applications` へドラッグ
-            2. 初回起動: Finder で `.app` を **右クリック → 開く**，ダイアログで「開く」
-            3. もしくは Terminal で `xattr -d com.apple.quarantine /Applications/Affinity\ Mapping\ Studio.app`
+            2. 初回起動（macOS 15 以降）: ダブルクリック →「開いていません」で「完了」→「システム設定」→「プライバシーとセキュリティ」の「このまま開く」→「開きますか?」で「このまま開く」→ パスワード
+            3. macOS 14 以前: `.app` を右クリック →「開く」→「開く」
+            4. 「壊れているため開けません」と出たら，Terminal で `xattr -dr com.apple.quarantine "/Applications/Affinity Mapping Studio.app"`
+            詳しくは docs/manual/01-install.md
 
             ## Windows (MSI)
 

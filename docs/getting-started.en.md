@@ -107,11 +107,12 @@ Open Settings → Apps → Installed apps, click "…" next to "Affinity Mapping
 
 1. On the Releases page, click `…_universal.dmg` to download it, then double-click the downloaded file.
 2. In the window that opens, drag the "Affinity Mapping Studio.app" icon onto the "Applications" folder and release it.
-3. Open the "Applications" folder in Finder, **right-click** "Affinity Mapping Studio" (on a trackpad, click with two fingers or hold the control key while clicking), and choose "Open".
-   The app is not digitally signed, so it does not open with a double-click the first time.
-4. When "Are you sure you want to open it?" appears, click "Open". From then on, a normal double-click starts the app.
+3. Open the "Applications" folder in Finder and double-click "Affinity Mapping Studio".
+   The app is not notarized by Apple, so a message says "Affinity Mapping Studio" Not Opened. Click "Done" (do not click "Move to Trash").
+4. Open Apple menu → System Settings → Privacy & Security, scroll down to the "Security" section, and click "Open Anyway".
+5. When asked "Open "Affinity Mapping Studio"?", click "Open Anyway" and enter your Mac password (an administrator's password if you use a standard account). From then on, a normal double-click starts the app.
 
-On macOS 13 or later, if steps 3 and 4 do not work, open System Settings → Privacy & Security and click "Open Anyway" near the bottom.
+On macOS 14 (Sonoma) or earlier, instead of steps 3 to 5, **right-click** "Affinity Mapping Studio" (on a trackpad, click with two fingers or hold the control key while clicking), choose "Open", and click "Open" in the "Are you sure you want to open it?" dialog.
 
 > **If you see "is damaged and can't be opened"**
 > Open Terminal (Applications → Utilities), paste the line below, press Enter, and open the app again.

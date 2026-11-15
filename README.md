@@ -23,6 +23,16 @@ A step-by-step guide with screenshots, from installation to saving and exporting
 - [はじめてのガイド（日本語）](docs/getting-started.ja.md)
 - [Getting started (English)](docs/getting-started.en.md)
 
+## 共同編集のサーバー / Collaboration server
+
+複数人で同じ図を編集するには，共同編集のサーバー（AMS Server）が要ります．参加するだけなら，管理者から招待 URL を受け取ればよく，サーバーを入れる必要はありません．サーバーを用意する人は，次を見てください．
+To edit the same diagram with others, you need a collaboration server (AMS Server). Participants only need an invite URL from the administrator. If you are setting up a server, see:
+
+- [サーバーの repo / Server repository](https://github.com/YukiInoueNakata/affinity-mapping-studio-server)
+- [サーバーのインストーラ / Server installer](https://github.com/YukiInoueNakata/affinity-mapping-studio-server/releases/latest)（Windows・Mac / Windows and macOS）
+- [サーバーのはじめてのガイド（日本語）](https://github.com/YukiInoueNakata/affinity-mapping-studio-server/blob/main/docs/getting-started.ja.md)
+- [Server getting started (English)](https://github.com/YukiInoueNakata/affinity-mapping-studio-server/blob/main/docs/getting-started.en.md)
+
 ## 困ったとき / Help
 
 不具合や質問は [Issues](https://github.com/YukiInoueNakata/affinity-mapping-studio/issues) へお寄せください．

@@ -319,6 +319,8 @@ To join a collaborative editing server, you receive an "invite URL" from the adm
 
 Once connected, the "Offline" badge changes and other participants' edits appear on your screen as they happen.
 
+To set up a server yourself, see the [server getting-started guide](https://github.com/YukiInoueNakata/affinity-mapping-studio-server/blob/main/docs/getting-started.en.md). The installer is on the [server Releases page](https://github.com/YukiInoueNakata/affinity-mapping-studio-server/releases/latest).
+
 ## 7. Troubleshooting
 
 - If something does not work, open an [issue](https://github.com/YukiInoueNakata/affinity-mapping-studio/issues) and tell us your computer (Windows or Mac, and its version) and what happened.

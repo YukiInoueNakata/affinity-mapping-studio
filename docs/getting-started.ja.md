@@ -319,6 +319,8 @@ macOS 14（Sonoma）以前では，3〜5 の代わりに，「Affinity Mapping S
 
 つながると「オフライン」の表示が変わり，ほかの参加者の編集がそのまま画面に反映されます．
 
+サーバーを自分で用意するときは，[サーバーのはじめてのガイド](https://github.com/YukiInoueNakata/affinity-mapping-studio-server/blob/main/docs/getting-started.ja.md)を見てください．インストーラは[サーバーの Releases](https://github.com/YukiInoueNakata/affinity-mapping-studio-server/releases/latest)にあります．
+
 ## 7. 困ったとき
 
 - うまく動かないときは，[Issues](https://github.com/YukiInoueNakata/affinity-mapping-studio/issues) に，使っているパソコン（Windows・Mac と版）と，起きたことを書いて知らせてください．

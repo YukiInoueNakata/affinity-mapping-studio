@@ -31,6 +31,9 @@ const QUIT_SAVE_WAIT: Duration = Duration::from_secs(5);
 /// 終了要求済みか (ウォッチドッグの多重起動と二重終了要求を抑止する)．
 static QUITTING: AtomicBool = AtomicBool::new(false);
 
+/// 起動し直しを求められたか (自動更新のあと)．Exit で exit せず restart する．
+static RESTARTING: AtomicBool = AtomicBool::new(false);
+
 /// 終了の最終防衛線を張る．
 ///
 /// 2026-08-16 調査: 最後のウィンドウが破棄された後に teardown が固まり，
@@ -200,13 +203,33 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, event| {
+        .run(|app, event| match event {
+            // 自動更新のあとの起動し直し (tauri-plugin-process の restart →
+            // AppHandle::request_restart) は，RESTART_EXIT_CODE 付きの ExitRequested を
+            // 出してから Exit を出す．その印を覚えておく．
+            tauri::RunEvent::ExitRequested {
+                code: Some(tauri::RESTART_EXIT_CODE),
+                ..
+            } => {
+                RESTARTING.store(true, Ordering::SeqCst);
+                diag::log_event(app, "restart requested");
+            }
             // tauri の cleanup_before_exit や wry/WebView2 の teardown が固まっても
             // ここで確実にプロセスを終わらせる (窓ゼロのゾンビを作らない)．
             // 保存中なら書込み完了だけ待ってから落とす．
-            if let tauri::RunEvent::Exit = event {
+            //
+            // 2026-11-18: ここで exit(0) すると tauri の restart まで進まず，
+            // 更新のあとアプリが閉じたままになっていた (v0.2.33 で発覚)．
+            // 起動し直すときは，teardown を待たずに新しいプロセスを立ててから
+            // 終わる (tauri::process::restart は spawn のあと exit する)．
+            tauri::RunEvent::Exit => {
                 project_io::wait_for_idle_write(QUIT_SAVE_WAIT);
+                if RESTARTING.load(Ordering::SeqCst) {
+                    diag::log_event(app, "restarting after exit");
+                    tauri::process::restart(&app.env());
+                }
                 std::process::exit(0);
             }
+            _ => {}
         });
 }

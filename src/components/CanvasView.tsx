@@ -5,7 +5,6 @@ import ReactFlow, {
   Background,
   Controls,
   MarkerType,
-  MiniMap,
   useNodesState,
   useReactFlow,
   ReactFlowProvider,
@@ -91,6 +90,7 @@ import {
   RELATION_TYPE_COLORS,
 } from '../domain/relations.js';
 import { confirmBulkOperation } from '../utils/bulkGuard.js';
+import { CanvasMiniMap } from './CanvasMiniMap.js';
 
 const nodeTypes = { card: CardNode, kjgroup: GroupNode };
 const edgeTypes = { relation: RelationEdge };
@@ -1869,9 +1869,8 @@ function CanvasViewImpl() {
           >
             <Background />
             <Controls />
-            {/* MiniMap re-renders all nodes as SVG dots; for very large
-             * projects we hide it to keep pan/zoom smooth. */}
-            {nodes.length <= 300 && <MiniMap pannable zoomable />}
+            {/* ミニマップは全ノードを描き直すので，大きな図では自動で隠す（設定は「表示」タブ）． */}
+            <CanvasMiniMap nodeCount={nodes.length} />
             {/* 2026-06-02: キャンバスモード切替 (pan / select)．
              * ReactFlow の Controls の上に重ねて表示 (左下) */}
             <div

@@ -3,7 +3,6 @@ import ReactFlow, {
   Background,
   Controls,
   MarkerType,
-  MiniMap,
   useEdgesState,
   useNodesState,
   type Connection,
@@ -25,6 +24,7 @@ import {
   relationExists,
 } from '../domain/relations.js';
 import type { DiagramObjectType } from '@shared/types/domain';
+import { CanvasMiniMap } from './CanvasMiniMap.js';
 
 const nodeTypes = { analytic: AnalyticNode };
 const edgeTypes = { relation: RelationEdge };
@@ -252,7 +252,7 @@ export function AnalyticDiagramView({ mode }: Props) {
         >
           <Background />
           <Controls />
-          <MiniMap pannable zoomable />
+          <CanvasMiniMap nodeCount={nodes.length} />
         </ReactFlow>
       </div>
     </div>

@@ -1,6 +1,12 @@
 import { MOD_KEY } from './utils/platform.js';
 import { formatLocal } from './utils/localTime.js';
 import { confirmDialog } from './services/confirmDialog.js';
+import {
+  MINIMAP_AUTO_LIMIT,
+  setMiniMapMode,
+  useMiniMapMode,
+  type MiniMapMode,
+} from './services/miniMapPref.js';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useProjectStore } from './stores/projectStore.js';
 import { logEvent } from './utils/errorBuffer.js';
@@ -274,6 +280,9 @@ export function App() {
 
   // (#3) 画面全体のズーム.  Ctrl/Cmd + Plus/Minus/0 で UI 全体 (ペイン・リボン・
   // キャンバス) のスケールを変える.  WebView2/Chromium の `zoom` を使う.
+  // ミニマップを出すか（端末ごと．services/miniMapPref.ts）．
+  const miniMapMode = useMiniMapMode();
+
   // sync デバッグオーバーレイ表示フラグ．既定 OFF．localStorage に永続化．
   // トラブルシュート時のみオンにする想定．
   const [showDebugOverlay, setShowDebugOverlay] = useState<boolean>(() => {
@@ -1725,6 +1734,31 @@ export function App() {
                   <span className="rb-glyph">⤢</span>
                   <span>全体表示</span>
                 </button>
+              </RibbonSection>
+              <RibbonSection label="ミニマップ">
+                {(
+                  [
+                    [
+                      'auto',
+                      '自動',
+                      `カードとグループが合わせて ${MINIMAP_AUTO_LIMIT} 個までなら出し，それより多いと隠す（既定）`,
+                    ],
+                    ['on', '表示', 'いつも出す（大きな図では動きが重くなることがあります）'],
+                    ['off', '非表示', '出さない'],
+                  ] as [MiniMapMode, string, string][]
+                ).map(([m, label, title]) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`rb-btn-lg ${miniMapMode === m ? 'rb-btn-active' : ''}`}
+                    onClick={() => setMiniMapMode(m)}
+                    title={`${title}．この PC だけの設定です`}
+                    aria-pressed={miniMapMode === m}
+                  >
+                    <span className="rb-glyph">{m === 'auto' ? 'A' : m === 'on' ? '▣' : '□'}</span>
+                    <span>{label}</span>
+                  </button>
+                ))}
               </RibbonSection>
               <RibbonSection label="カード">
                 <button

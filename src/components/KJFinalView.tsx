@@ -14,7 +14,6 @@ import ReactFlow, {
   Background,
   Controls,
   MarkerType,
-  MiniMap,
   ReactFlowProvider,
   useNodesState,
   useReactFlow,
@@ -51,6 +50,7 @@ import type {
   FinalDiagramShape,
   FinalDiagramShapeKind,
 } from '@shared/types/domain';
+import { CanvasMiniMap } from './CanvasMiniMap.js';
 
 const nodeTypes = { kjgroup: GroupNode, kjfinalshape: KJFinalShapeNode };
 const edgeTypes = { relation: RelationEdge };
@@ -330,7 +330,7 @@ function KJFinalViewImpl() {
         >
           <Background />
           <Controls />
-          <MiniMap pannable zoomable />
+          <CanvasMiniMap nodeCount={rfNodes.length} />
         </ReactFlow>
         <KJFinalAnnotationCard />
       </div>

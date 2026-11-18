@@ -16,7 +16,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
-  MiniMap,
   ReactFlowProvider,
   useNodesState,
   useReactFlow,
@@ -52,6 +51,7 @@ import {
   makeLevelPosition,
 } from '../domain/levels.js';
 import type { LevelPosition, ProjectData } from '@shared/types/domain';
+import { CanvasMiniMap } from './CanvasMiniMap.js';
 
 interface LevelBoxData {
   kind: 'box';
@@ -466,7 +466,7 @@ function LevelViewImpl({ level }: { level: number }) {
         >
           <Background />
           <Controls />
-          <MiniMap pannable zoomable />
+          <CanvasMiniMap nodeCount={rfNodes.length} />
         </ReactFlow>
       </div>
     </div>
